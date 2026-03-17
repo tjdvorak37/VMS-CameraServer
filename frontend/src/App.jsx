@@ -9,6 +9,7 @@ import Recordings from './pages/Recordings'
 import Events from './pages/Events'
 import UserManagement from './pages/UserManagement'
 import Settings from './pages/Settings'
+import About from './pages/About'
 
 function PrivateRoute({ children, adminOnly = false }) {
   const { user, loading } = useAuth()
@@ -41,6 +42,7 @@ export default function App() {
           <Route path="cameras" element={<CameraManagement />} />
           <Route path="recordings" element={<Recordings />} />
           <Route path="events" element={<Events />} />
+          <Route path="about" element={<About />} />
           <Route path="users" element={
             <PrivateRoute adminOnly>
               <UserManagement />

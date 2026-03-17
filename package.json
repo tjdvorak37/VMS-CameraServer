@@ -9,6 +9,9 @@
     "dev:frontend": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build",
     "start": "npm --prefix backend run start",
+    "desktop:install": "npm install --prefix desktop-client",
+    "desktop:build:win": "npm --prefix desktop-client run build:win",
+    "server:package:win": "bash scripts/build-windows-server-package.sh",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:build": "npm run build && docker compose up -d --build"

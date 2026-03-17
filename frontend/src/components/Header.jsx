@@ -9,6 +9,7 @@ const PAGE_TITLES = {
   '/cameras':    'Camera Management',
   '/recordings': 'Recordings',
   '/events':     'Events & Alerts',
+  '/about':      'About and Docs',
   '/users':      'User Management',
   '/settings':   'System Settings',
 }

@@ -57,7 +57,7 @@ router.put('/settings', authenticate, (req, res) => {
     return res.status(403).json({ error: 'Admin required' });
   }
   const db = getDb();
-  const allowed = ['retention_days', 'snapshot_interval', 'email_alerts', 'smtp_host', 'smtp_port'];
+  const allowed = ['retention_days', 'max_cameras', 'snapshot_interval', 'email_alerts', 'smtp_host', 'smtp_port'];
   const upsert = db.prepare(
     'INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)'
   );

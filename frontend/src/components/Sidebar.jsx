@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Video, Camera, Film, AlertTriangle,
-  Users, Settings, LogOut, Shield, ChevronRight
+  Users, Settings, LogOut, Shield, Info
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -11,6 +11,7 @@ const navItems = [
   { to: '/cameras',   icon: Camera,          label: 'Cameras' },
   { to: '/recordings',icon: Film,            label: 'Recordings' },
   { to: '/events',    icon: AlertTriangle,   label: 'Events' },
+  { to: '/about',     icon: Info,            label: 'About' },
 ]
 
 const adminItems = [

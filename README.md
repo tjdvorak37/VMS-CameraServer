@@ -96,6 +96,156 @@ docker compose logs -f vms-backend
 
 ---
 
+## Local Server Deployment (systemd + nginx)
+
+Use this path if you are deploying on a local Linux server without Docker.
+
+### 1. Install server dependencies
+```bash
+sudo apt update
+sudo apt install -y curl git ffmpeg nginx
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs
+```
+
+### 2. Clone and initialize
+```bash
+cd /opt
+sudo git clone <repo-url> VMS-CameraServer
+cd /opt/VMS-CameraServer
+sudo chmod +x setup.sh
+sudo ./setup.sh
+```
+
+### 3. Configure environment
+```bash
+cd /opt/VMS-CameraServer
+sudo cp .env.example .env
+sudo nano .env
+```
+
+Recommended production values:
+- `NODE_ENV=production`
+- `PORT=3001`
+- `CORS_ORIGINS=http://vms.local` (or your server FQDN)
+- `JWT_SECRET=<long-random-secret>`
+
+### 4. Build frontend for production
+```bash
+cd /opt/VMS-CameraServer
+npm --prefix frontend run build
+```
+
+### 5. Create systemd service
+Create `/etc/systemd/system/vms.service`:
+
+```ini
+[Unit]
+Description=VMS Camera Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/VMS-CameraServer
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm --prefix /opt/VMS-CameraServer/backend run start
+Restart=always
+RestartSec=5
+User=vms
+Group=vms
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+```bash
+sudo useradd --system --shell /usr/sbin/nologin --home /opt/VMS-CameraServer vms || true
+sudo chown -R vms:vms /opt/VMS-CameraServer
+sudo systemctl daemon-reload
+sudo systemctl enable --now vms
+sudo systemctl status vms --no-pager
+```
+
+### 6. Configure nginx reverse proxy
+Create `/etc/nginx/sites-available/vms`:
+
+```nginx
+server {
+	listen 80;
+	server_name vms.local;
+
+	location / {
+		proxy_pass http://127.0.0.1:3001;
+		proxy_http_version 1.1;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection "upgrade";
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+	}
+}
+```
+
+Enable and reload nginx:
+```bash
+sudo ln -sf /etc/nginx/sites-available/vms /etc/nginx/sites-enabled/vms
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+### 7. Open firewall and verify
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+curl http://127.0.0.1:3001/api/health
+```
+
+Access the system at `http://vms.local` (or your configured host).
+
+---
+
+## Windows Desktop Client Installer (.exe)
+
+This repository includes a desktop access client at `desktop-client/` for users who prefer a Windows app that opens your deployed VMS server.
+
+### Build the installer
+```bash
+# From repo root
+npm run desktop:install
+npm run desktop:build:win
+```
+
+Expected artifact:
+- `desktop-client/dist/VMS-Desktop-Client-Setup.exe`
+
+### User experience
+- Users install the desktop client via `.exe`
+- Admin can export a desktop config from **About and Docs** in the web UI
+- Users import the config file in the desktop app (or enter URL manually)
+- The app saves the URL and opens the VMS web interface inside a desktop window
+
+### Windows server installer package (thumb drive friendly)
+
+Create a portable ZIP bundle that you can copy to a USB drive and run directly on a target Windows server:
+
+```bash
+npm run server:package:win
+```
+
+Output artifact:
+- `dist/windows-server-installer/VMS-Server-Installer.zip`
+
+On the target Windows server:
+1. Extract `VMS-Server-Installer.zip`
+2. Run `INSTALL-WINDOWS-SERVER.cmd` as Administrator
+3. Follow prompts (default data drive is `E:`)
+
+The installer script configures storage paths, environment, firewall, dependencies, and starts a Windows service.
+
+---
+
 ## Environment Variables
 
 Copy `.env.example` to `.env` and adjust as needed.

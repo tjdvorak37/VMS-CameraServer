@@ -23,6 +23,7 @@ export default function Settings() {
   const { user } = useAuth()
   const [settings, setSettings] = useState({
     retention_days: '30',
+    max_cameras: '64',
     snapshot_interval: '60',
     email_alerts: 'false',
     smtp_host: '',
@@ -92,7 +93,7 @@ export default function Settings() {
       {/* Recording retention settings */}
       <form onSubmit={saveSettings}>
         <SettingSection title="Recording & Retention" icon={HardDrive}>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="label">Retention Period (days)</label>
               <input
@@ -105,6 +106,20 @@ export default function Settings() {
               />
               <p className="text-xs text-slate-500 mt-1">
                 Recordings older than this will be deleted automatically
+              </p>
+            </div>
+            <div>
+              <label className="label">Max Cameras</label>
+              <input
+                type="number"
+                className="input"
+                min={1}
+                max={512}
+                value={settings.max_cameras}
+                onChange={e => setSettings(s => ({ ...s, max_cameras: e.target.value }))}
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                System-wide camera capacity target
               </p>
             </div>
             <div>

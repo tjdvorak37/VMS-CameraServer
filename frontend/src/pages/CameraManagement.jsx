@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Plus, Search, RefreshCw, Loader2, Camera, Wifi, WifiOff,
-  Circle, Trash2, Edit3, Radio, StopCircle, CheckCircle, AlertTriangle, Scan
+  Circle, Trash2, Edit3, Radio, StopCircle, Scan, Image
 } from 'lucide-react'
 import { cameraApi } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
@@ -20,15 +20,16 @@ function AddEditModal({ camera, onClose, onSave }) {
     ip_address: camera?.ip_address || '',
     rtsp_url: camera?.rtsp_url || `rtsp://${camera?.ip_address || ''}:554/stream1`,
     port: camera?.port || 554,
+    onvif_port: camera?.onvif_port || 80,
     username: camera?.username || '',
     password: camera?.password || '',
+    snapshot_url: camera?.snapshot_url || '',
     manufacturer: camera?.manufacturer || '',
     model: camera?.model || '',
     location: camera?.location || '',
     resolution: camera?.resolution || '1920x1080',
     fps: camera?.fps || 15,
     recording_enabled: camera?.recording_enabled !== 0,
-    onvif_port: camera?.onvif_port || 80,
   })
   const [saving, setSaving] = useState(false)
 
@@ -82,12 +83,25 @@ function AddEditModal({ camera, onClose, onSave }) {
             </div>
             <div>
               <label className="label">RTSP Port</label>
-              <input type="number" className="input" value={form.port} onChange={e => setForm(f => ({ ...f, port: parseInt(e.target.value) }))} />
+              <input type="number" className="input" value={form.port} onChange={e => setForm(f => ({ ...f, port: parseInt(e.target.value, 10) || 0 }))} />
+            </div>
+            <div className="col-span-2">
+              <label className="label">ONVIF Port</label>
+              <input type="number" className="input" value={form.onvif_port} onChange={e => setForm(f => ({ ...f, onvif_port: parseInt(e.target.value, 10) || 0 }))} />
             </div>
             <div className="col-span-2">
               <label className="label">RTSP URL *</label>
               <input className="input font-mono text-sm" value={form.rtsp_url} onChange={e => setForm(f => ({ ...f, rtsp_url: e.target.value }))} required />
               <p className="text-xs text-slate-500 mt-1">e.g. rtsp://user:pass@192.168.1.100:554/stream1</p>
+            </div>
+            <div className="col-span-2">
+              <label className="label">Snapshot URL (optional)</label>
+              <input
+                className="input font-mono text-sm"
+                value={form.snapshot_url}
+                onChange={e => setForm(f => ({ ...f, snapshot_url: e.target.value }))}
+                placeholder="http://camera-ip/cgi-bin/snapshot.jpg"
+              />
             </div>
             <div>
               <label className="label">Username</label>
@@ -157,40 +171,157 @@ function AddEditModal({ camera, onClose, onSave }) {
 function DiscoverModal({ onAdd, onClose }) {
   const [scanning, setScanning] = useState(true)
   const [devices, setDevices] = useState([])
+  const [profileFilter, setProfileFilter] = useState('avigilon-like')
+  const [styleFilter, setStyleFilter] = useState('all')
+  const [query, setQuery] = useState('')
 
-  useEffect(() => {
+  const runDiscovery = useCallback(() => {
+    setScanning(true)
     cameraApi.discover()
       .then(res => setDevices(res.data.devices || []))
       .catch(() => toast.error('Discovery failed'))
       .finally(() => setScanning(false))
   }, [])
 
+  useEffect(() => {
+    runDiscovery()
+  }, [runDiscovery])
+
+  const styleOptions = useMemo(() => {
+    const allStyles = Array.from(
+      new Set(devices.map(d => d.camera_style || 'Standard IP'))
+    ).sort((a, b) => a.localeCompare(b))
+
+    return ['all', ...allStyles]
+  }, [devices])
+
+  const filteredDevices = useMemo(() => {
+    const term = query.trim().toLowerCase()
+
+    return [...devices]
+      .filter(d => {
+        const manufacturer = (d.manufacturer || '').toLowerCase()
+        if (profileFilter === 'all') return true
+        if (profileFilter === 'avigilon-only') {
+          return d.is_avigilon || manufacturer.includes('avigilon')
+        }
+        return d.is_avigilon_like || manufacturer.includes('avigilon')
+      })
+      .filter(d => {
+        if (styleFilter === 'all') return true
+        return (d.camera_style || 'Standard IP') === styleFilter
+      })
+      .filter(d => {
+        if (!term) return true
+        return [
+          d.manufacturer,
+          d.model,
+          d.ip,
+          d.protocol,
+          d.camera_style,
+          d.device_type,
+          d.scope_name,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(term)
+      })
+      .sort((a, b) => {
+        const rank = { high: 3, medium: 2, low: 1 }
+        const confidenceDiff = (rank[b.match_confidence] || 0) - (rank[a.match_confidence] || 0)
+        if (confidenceDiff !== 0) return confidenceDiff
+
+        const profileDiff = (b.is_avigilon_like ? 1 : 0) - (a.is_avigilon_like ? 1 : 0)
+        if (profileDiff !== 0) return profileDiff
+
+        return (a.manufacturer || '').localeCompare(b.manufacturer || '')
+      })
+  }, [devices, profileFilter, styleFilter, query])
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 animate-fade-in">
-      <div className="bg-surface-700 border border-surface-500 rounded-2xl w-full max-w-lg shadow-2xl">
+      <div className="bg-surface-700 border border-surface-500 rounded-2xl w-full max-w-3xl shadow-2xl">
         <div className="flex items-center justify-between px-6 py-4 border-b border-surface-500">
           <h2 className="text-lg font-semibold text-slate-100">Discover Cameras</h2>
-          <button onClick={onClose} className="btn-ghost p-1.5">✕</button>
+          <div className="flex items-center gap-2">
+            <button onClick={runDiscovery} className="btn-secondary text-xs py-1.5 px-3" disabled={scanning}>
+              <RefreshCw size={12} className={`inline mr-1 ${scanning ? 'animate-spin' : ''}`} />
+              Scan Again
+            </button>
+            <button onClick={onClose} className="btn-ghost p-1.5">✕</button>
+          </div>
         </div>
-        <div className="p-6">
+
+        <div className="p-6 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label className="label text-xs">Camera Profile</label>
+              <select className="input" value={profileFilter} onChange={e => setProfileFilter(e.target.value)}>
+                <option value="avigilon-like">Avigilon + alike (recommended)</option>
+                <option value="avigilon-only">Avigilon only</option>
+                <option value="all">All ONVIF devices</option>
+              </select>
+            </div>
+            <div>
+              <label className="label text-xs">Style / Type</label>
+              <select className="input" value={styleFilter} onChange={e => setStyleFilter(e.target.value)}>
+                {styleOptions.map(style => (
+                  <option key={style} value={style}>
+                    {style === 'all' ? 'All styles' : style}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label text-xs">Search</label>
+              <input
+                className="input"
+                placeholder="Manufacturer, model, IP..."
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-500">
+            Showing {filteredDevices.length} of {devices.length} discovered device{devices.length !== 1 ? 's' : ''}
+          </p>
+
           {scanning ? (
             <div className="flex flex-col items-center py-8 gap-3">
               <Loader2 size={32} className="animate-spin text-accent" />
               <p className="text-slate-400">Scanning network for ONVIF cameras...</p>
             </div>
-          ) : devices.length === 0 ? (
+          ) : filteredDevices.length === 0 ? (
             <div className="text-center py-8">
               <Wifi size={32} className="text-slate-600 mx-auto mb-3" />
-              <p className="text-slate-400">No ONVIF cameras found on the network.</p>
-              <p className="text-xs text-slate-500 mt-2">Try adding cameras manually using their RTSP URL.</p>
+              {devices.length === 0 ? (
+                <>
+                  <p className="text-slate-400">No ONVIF cameras found on the network.</p>
+                  <p className="text-xs text-slate-500 mt-2">Try adding cameras manually using their RTSP URL.</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-slate-400">No cameras match the selected profile/style filters.</p>
+                  <p className="text-xs text-slate-500 mt-2">Switch to "All ONVIF devices" to view everything discovered.</p>
+                </>
+              )}
             </div>
           ) : (
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {devices.map((d, i) => (
-                <div key={i} className="flex items-center justify-between p-3 bg-surface-800 rounded-lg border border-surface-600">
+            <div className="space-y-2 max-h-72 overflow-y-auto">
+              {filteredDevices.map((d, i) => (
+                <div key={`${d.ip}-${i}`} className="flex items-center justify-between p-3 bg-surface-800 rounded-lg border border-surface-600">
                   <div>
                     <div className="text-sm font-medium text-slate-200">{d.manufacturer} {d.model}</div>
-                    <div className="text-xs text-slate-500 font-mono">{d.ip} • {d.protocol}</div>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                      <span className="text-xs text-slate-500 font-mono">{d.ip} • {d.protocol}</span>
+                      <span className="badge-info">{d.camera_style || 'Standard IP'}</span>
+                      <span className="badge bg-surface-500 text-slate-300">{d.device_type || 'IP Camera'}</span>
+                      <span className={d.is_avigilon_like ? 'badge-online' : 'badge bg-surface-500 text-slate-400'}>
+                        {d.profile_label || (d.is_avigilon_like ? 'Avigilon-like' : 'Other ONVIF')}
+                      </span>
+                    </div>
                   </div>
                   <button
                     onClick={() => { onAdd(d); onClose() }}
@@ -209,7 +340,7 @@ function DiscoverModal({ onAdd, onClose }) {
 }
 
 export default function CameraManagement() {
-  const { isOperator } = useAuth()
+  const { isOperator, isAdmin } = useAuth()
   const [cameras, setCameras] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -242,7 +373,8 @@ export default function CameraManagement() {
   }
 
   const toggleRecording = async (cam) => {
-    setProcessing(p => ({ ...p, [cam.id]: true }))
+    const key = `rec-${cam.id}`
+    setProcessing(p => ({ ...p, [key]: true }))
     try {
       if (cam.recording_enabled) {
         await cameraApi.stopRecording(cam.id)
@@ -255,7 +387,40 @@ export default function CameraManagement() {
     } catch {
       toast.error('Failed to toggle recording')
     } finally {
-      setProcessing(p => ({ ...p, [cam.id]: false }))
+      setProcessing(p => ({ ...p, [key]: false }))
+    }
+  }
+
+  const toggleStream = async (cam) => {
+    const key = `stream-${cam.id}`
+    setProcessing(p => ({ ...p, [key]: true }))
+    try {
+      if (cam.status === 'online') {
+        await cameraApi.stopStream(cam.id)
+        toast.success(`Stream stopped: ${cam.name}`)
+      } else {
+        await cameraApi.startStream(cam.id)
+        toast.success(`Stream starting: ${cam.name}`)
+      }
+      fetchCameras()
+    } catch {
+      toast.error('Failed to toggle stream')
+    } finally {
+      setProcessing(p => ({ ...p, [key]: false }))
+    }
+  }
+
+  const takeSnapshot = async (cam) => {
+    const key = `snap-${cam.id}`
+    setProcessing(p => ({ ...p, [key]: true }))
+    try {
+      await cameraApi.snapshot(cam.id)
+      toast.success(`Snapshot captured: ${cam.name}`)
+      fetchCameras()
+    } catch {
+      toast.error('Snapshot failed')
+    } finally {
+      setProcessing(p => ({ ...p, [key]: false }))
     }
   }
 
@@ -323,7 +488,7 @@ export default function CameraManagement() {
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-500">
+                  <td colSpan={isOperator ? 7 : 6} className="py-12 text-center text-slate-500">
                     {cameras.length === 0 ? 'No cameras added yet' : 'No cameras match your search'}
                   </td>
                 </tr>
@@ -359,12 +524,28 @@ export default function CameraManagement() {
                     <td>
                       <div className="flex items-center justify-end gap-1">
                         <button
+                          onClick={() => toggleStream(cam)}
+                          disabled={!!processing[`stream-${cam.id}`]}
+                          className={`btn-ghost p-1.5 text-xs ${cam.status === 'online' ? 'text-warning hover:text-yellow-300' : 'text-info hover:text-blue-300'}`}
+                          title={cam.status === 'online' ? 'Stop Stream' : 'Start Stream'}
+                        >
+                          {cam.status === 'online' ? <WifiOff size={15} /> : <Wifi size={15} />}
+                        </button>
+                        <button
                           onClick={() => toggleRecording(cam)}
-                          disabled={!!processing[cam.id]}
+                          disabled={!!processing[`rec-${cam.id}`]}
                           className={`btn-ghost p-1.5 text-xs ${cam.recording_enabled ? 'text-danger hover:text-red-300' : 'text-success hover:text-green-300'}`}
                           title={cam.recording_enabled ? 'Stop Recording' : 'Start Recording'}
                         >
                           {cam.recording_enabled ? <StopCircle size={15} /> : <Radio size={15} />}
+                        </button>
+                        <button
+                          onClick={() => takeSnapshot(cam)}
+                          disabled={!!processing[`snap-${cam.id}`]}
+                          className="btn-ghost p-1.5 text-info hover:text-blue-300"
+                          title="Capture Snapshot"
+                        >
+                          <Image size={15} />
                         </button>
                         <button
                           onClick={() => { setEditCamera(cam); setModal('edit') }}
@@ -373,13 +554,15 @@ export default function CameraManagement() {
                         >
                           <Edit3 size={15} />
                         </button>
-                        <button
-                          onClick={() => deleteCamera(cam)}
-                          className="btn-ghost p-1.5 text-danger hover:text-red-300"
-                          title="Delete"
-                        >
-                          <Trash2 size={15} />
-                        </button>
+                        {isAdmin && (
+                          <button
+                            onClick={() => deleteCamera(cam)}
+                            className="btn-ghost p-1.5 text-danger hover:text-red-300"
+                            title="Delete"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   )}

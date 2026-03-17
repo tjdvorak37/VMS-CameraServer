@@ -1,6 +1,7 @@
 node_modules/
 backend/node_modules/
 frontend/node_modules/
+desktop-client/node_modules/
 
 .env
 backend/.env
@@ -10,6 +11,8 @@ backend/data/
 backend/logs/
 
 frontend/dist/
+desktop-client/dist/
+dist/
 
 .DS_Store
 *.log
