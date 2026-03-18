@@ -25,6 +25,10 @@ Double-click:
 
 `installer\windows\install-vms-server.cmd`
 
+For a Windows 11 mouse-first walkthrough using the packaged installer bundle, see `README-WINDOWS-11-GUI-SETUP.md`.
+
+For a shorter checklist version, see `README-WINDOWS-11-QUICK-INSTALL.md`.
+
 ## Optional arguments
 
 Run from an elevated command prompt:
@@ -48,3 +52,4 @@ installer\windows\install-vms-server.cmd -SkipService
 Notes:
 - If you place nginx/IIS in front of the backend, use that public URL instead of `:3001`.
 - If you later change runtime server values in **Settings > Server Setup**, restart the backend service.
+- If you are using the packaged ZIP, you can also launch `INSTALL-WINDOWS-SERVER.cmd` from the extracted folder.

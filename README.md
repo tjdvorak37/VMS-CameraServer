@@ -252,6 +252,10 @@ On the target Windows server:
 
 The installer script configures storage paths, environment, firewall, dependencies, and starts a Windows service.
 
+For a mouse-first walkthrough on Windows 11, see `installer/windows/README-WINDOWS-11-GUI-SETUP.md`.
+
+For a one-page checklist, see `installer/windows/README-WINDOWS-11-QUICK-INSTALL.md`.
+
 ---
 
 ## Environment Variables

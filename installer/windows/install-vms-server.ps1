@@ -187,4 +187,5 @@ Write-Host "URL: http://localhost:3001" -ForegroundColor Green
 Write-Host "Install path: $InstallDir" -ForegroundColor Green
 Write-Host "Data path: $dataRoot" -ForegroundColor Green
 Write-Host ''
-Write-Host 'Default login: admin / Admin@1234 (change immediately after first login)' -ForegroundColor Yellow
+Write-Host 'Next step: open http://localhost:3001/setup and complete first-run setup.' -ForegroundColor Yellow
+Write-Host 'Then sign in with the admin account created in the setup wizard.' -ForegroundColor Yellow
