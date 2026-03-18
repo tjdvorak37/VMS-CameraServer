@@ -1,11 +1,27 @@
 const path = require('path');
 const fs = require('fs');
-const { app, BrowserWindow, ipcMain, Menu, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, shell, nativeImage } = require('electron');
 
 const DEFAULT_SERVER_URL = process.env.VMS_SERVER_URL || 'http://localhost:3001';
 const CONFIG_FILE = 'config.json';
 
 let mainWindow;
+
+function loadAppIcon() {
+  const candidates = [
+    path.join(__dirname, 'assets', 'vms-shield.png'),
+    path.join(__dirname, 'assets', 'vms-shield.ico'),
+  ];
+
+  for (const iconPath of candidates) {
+    if (!fs.existsSync(iconPath)) continue;
+
+    const icon = nativeImage.createFromPath(iconPath);
+    if (!icon.isEmpty()) return icon;
+  }
+
+  return null;
+}
 
 function configPath() {
   return path.join(app.getPath('userData'), CONFIG_FILE);
@@ -91,6 +107,8 @@ function createMenu() {
 }
 
 function createWindow() {
+  const appIcon = loadAppIcon();
+
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -104,6 +122,7 @@ function createWindow() {
       nodeIntegration: false,
     },
     title: 'VMS Desktop Client',
+    icon: appIcon || undefined,
   });
 
   mainWindow.webContents.on('did-fail-load', (_event, _errorCode, _errorDescription, validatedURL, isMainFrame) => {
@@ -132,6 +151,11 @@ ipcMain.handle('vms:save-server-url', async (_event, value) => {
 });
 
 app.whenReady().then(() => {
+  const appIcon = loadAppIcon();
+  if (appIcon && process.platform === 'darwin' && app.dock?.setIcon) {
+    app.dock.setIcon(appIcon);
+  }
+
   createMenu();
   createWindow();
 

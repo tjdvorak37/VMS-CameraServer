@@ -5,7 +5,7 @@
   "description": "Desktop launcher for VMS Camera Server",
   "main": "main.js",
   "scripts": {
-    "package:win": "electron-packager . VMS-Desktop-Client --platform=win32 --arch=x64 --out=dist --overwrite --prune=true --asar",
+    "package:win": "electron-packager . VMS-Desktop-Client --platform=win32 --arch=x64 --out=dist --overwrite --prune=true --asar --icon=assets/vms-shield.ico",
     "installer:win": "makensis -DAPPDIR=dist/VMS-Desktop-Client-win32-x64 -DOUTFILE=dist/VMS-Desktop-Client-Setup.exe installer.nsi",
     "build:win": "npm run package:win && npm run installer:win"
   },

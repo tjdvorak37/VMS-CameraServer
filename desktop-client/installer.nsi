@@ -5,6 +5,11 @@ OutFile "${OUTFILE}"
 InstallDir "$PROGRAMFILES64\\VMS Desktop Client"
 RequestExecutionLevel user
 Unicode True
+Icon "assets\\vms-shield.ico"
+UninstallIcon "assets\\vms-shield.ico"
+
+!define MUI_ICON "assets\\vms-shield.ico"
+!define MUI_UNICON "assets\\vms-shield.ico"
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY

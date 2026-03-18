@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="./assets/vms-shield.svg" type="image/svg+xml" />
     <title>VMS Desktop Client Setup</title>
     <style>
       :root {
@@ -28,6 +29,23 @@
       h1 {
         margin: 0;
         font-size: 24px;
+      }
+      .title-row {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .logo {
+        width: 44px;
+        height: 44px;
+        flex: 0 0 auto;
+      }
+      .subtitle {
+        margin: 2px 0 0;
+        color: #93c5fd;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
       }
       p {
         margin: 10px 0;
@@ -91,7 +109,13 @@
   </head>
   <body>
     <main class="card">
-      <h1>Connect to VMS Server</h1>
+      <div class="title-row">
+        <img src="./assets/vms-shield.svg" alt="VMS Shield Logo" class="logo" />
+        <div>
+          <h1>Connect to VMS Server</h1>
+          <p class="subtitle">VMS Desktop Client</p>
+        </div>
+      </div>
       <p>
         This desktop app connects to your deployed VMS web server. Enter the base URL below.
         Example: <code>http://192.168.1.50:3001</code> or <code>https://vms.company.local</code>
