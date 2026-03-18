@@ -79,6 +79,6 @@ echo -e "  Frontend only:       ${BLUE}npm run dev:frontend${NC}  → http://loc
 echo -e "  Production build:    ${BLUE}npm run build && npm start${NC}"
 echo -e "  Docker deployment:   ${BLUE}npm run docker:build${NC}"
 echo ""
-echo -e "  Default credentials: ${YELLOW}admin / Admin@1234${NC}"
-echo -e "  ${RED}⚠ Change the default password after first login!${NC}"
+echo -e "  Initial setup:       ${BLUE}http://localhost:5173/setup${NC}"
+echo -e "  ${YELLOW}Complete the web wizard to create your first admin account.${NC}"
 echo ""

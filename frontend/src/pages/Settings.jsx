@@ -1,9 +1,16 @@
 import { useState, useEffect } from 'react'
 import {
-  Save, Loader2, Shield, HardDrive, Bell,
-  Clock, RefreshCw, KeyRound
+  Save,
+  Loader2,
+  Shield,
+  HardDrive,
+  Bell,
+  KeyRound,
+  ServerCog,
+  AlertTriangle,
+  Globe,
 } from 'lucide-react'
-import { dashboardApi, authApi } from '../services/api'
+import { dashboardApi, authApi, setupApi } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import toast from 'react-hot-toast'
 
@@ -32,14 +39,95 @@ export default function Settings() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
+  const [serverConfig, setServerConfig] = useState({
+    node_env: 'production',
+    port: '3001',
+    vms_port: '8080',
+    cors_origins: 'http://localhost:5173,http://localhost:3001',
+    segment_duration: '600',
+    public_base_url: '',
+  })
+  const [runtimeConfig, setRuntimeConfig] = useState({
+    node_env: '',
+    port: '',
+    cors_origins: '',
+    segment_duration: '',
+  })
+  const [serverMeta, setServerMeta] = useState({
+    envExists: true,
+    envWritable: true,
+    restartRequiredFields: [],
+    note: '',
+  })
+  const [serverSaving, setServerSaving] = useState(false)
+  const [serverConfigError, setServerConfigError] = useState('')
+  const [restartNotice, setRestartNotice] = useState('')
+
   const [pwForm, setPwForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' })
   const [pwSaving, setPwSaving] = useState(false)
 
+  const refreshServerConfig = async () => {
+    const res = await setupApi.serverConfig()
+    const data = res.data || {}
+
+    setServerConfig(prev => ({
+      ...prev,
+      ...(data.values || {}),
+    }))
+
+    setRuntimeConfig(prev => ({
+      ...prev,
+      ...(data.runtime || {}),
+    }))
+
+    setServerMeta({
+      envExists: Boolean(data.env?.exists),
+      envWritable: Boolean(data.env?.writable),
+      restartRequiredFields: Array.isArray(data.restartRequiredFields) ? data.restartRequiredFields : [],
+      note: data.note || '',
+    })
+  }
+
   useEffect(() => {
-    dashboardApi.settings()
-      .then(res => setSettings(s => ({ ...s, ...res.data })))
-      .catch(console.error)
-      .finally(() => setLoading(false))
+    let isMounted = true
+
+    Promise.allSettled([
+      dashboardApi.settings(),
+      setupApi.serverConfig(),
+    ])
+      .then(results => {
+        if (!isMounted) return
+
+        const [settingsResult, serverResult] = results
+
+        if (settingsResult.status === 'fulfilled') {
+          setSettings(s => ({ ...s, ...settingsResult.value.data }))
+        } else {
+          toast.error('Failed to load dashboard settings')
+        }
+
+        if (serverResult.status === 'fulfilled') {
+          const data = serverResult.value.data || {}
+          setServerConfig(prev => ({ ...prev, ...(data.values || {}) }))
+          setRuntimeConfig(prev => ({ ...prev, ...(data.runtime || {}) }))
+          setServerMeta({
+            envExists: Boolean(data.env?.exists),
+            envWritable: Boolean(data.env?.writable),
+            restartRequiredFields: Array.isArray(data.restartRequiredFields) ? data.restartRequiredFields : [],
+            note: data.note || '',
+          })
+          setServerConfigError('')
+        } else {
+          setServerConfigError('Unable to load server configuration endpoint. Ensure backend is updated and reachable.')
+        }
+      })
+      .finally(() => {
+        if (isMounted) setLoading(false)
+      })
+
+    return () => {
+      isMounted = false
+    }
   }, [])
 
   const saveSettings = async (e) => {
@@ -80,6 +168,113 @@ export default function Settings() {
     }
   }
 
+  const saveServerConfig = async (e) => {
+    e.preventDefault()
+
+    const port = Number.parseInt(serverConfig.port, 10)
+    const publicPort = Number.parseInt(serverConfig.vms_port, 10)
+    const segmentDuration = Number.parseInt(serverConfig.segment_duration, 10)
+
+    if (!['development', 'production'].includes(serverConfig.node_env)) {
+      toast.error('Node environment must be development or production')
+      return
+    }
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      toast.error('Backend port must be between 1 and 65535')
+      return
+    }
+    if (!Number.isInteger(publicPort) || publicPort < 1 || publicPort > 65535) {
+      toast.error('Public port must be between 1 and 65535')
+      return
+    }
+    if (!Number.isInteger(segmentDuration) || segmentDuration < 10 || segmentDuration > 86400) {
+      toast.error('Segment duration must be between 10 and 86400 seconds')
+      return
+    }
+
+    const origins = serverConfig.cors_origins
+      .split(',')
+      .map(origin => origin.trim())
+      .filter(Boolean)
+
+    if (origins.length === 0) {
+      toast.error('At least one CORS origin is required')
+      return
+    }
+
+    for (const origin of origins) {
+      let parsed
+      try {
+        parsed = new URL(origin)
+      } catch {
+        toast.error(`Invalid CORS origin: ${origin}`)
+        return
+      }
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        toast.error(`CORS origin must use http/https: ${origin}`)
+        return
+      }
+    }
+
+    const publicBaseUrl = (serverConfig.public_base_url || '').trim()
+    if (publicBaseUrl) {
+      let parsed
+      try {
+        parsed = new URL(publicBaseUrl)
+      } catch {
+        toast.error('Public base URL must be a valid URL')
+        return
+      }
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        toast.error('Public base URL must use http/https')
+        return
+      }
+    }
+
+    setServerSaving(true)
+
+    try {
+      const res = await setupApi.updateServerConfig({
+        node_env: serverConfig.node_env,
+        port,
+        vms_port: publicPort,
+        cors_origins: origins.join(','),
+        segment_duration: segmentDuration,
+        public_base_url: publicBaseUrl,
+      })
+
+      const changedFields = Array.isArray(res.data?.changedFields) ? res.data.changedFields : []
+      const restartFields = Array.isArray(res.data?.restartRequiredFieldsChanged)
+        ? res.data.restartRequiredFieldsChanged
+        : []
+
+      if (changedFields.length === 0) {
+        toast.success('No server configuration changes were needed')
+      } else if (restartFields.length > 0) {
+        toast.success('Server configuration saved. Restart required.')
+      } else {
+        toast.success('Server configuration saved')
+      }
+
+      setRestartNotice(
+        restartFields.length > 0
+          ? `Restart backend service to apply: ${restartFields.join(', ')}`
+          : ''
+      )
+
+      await refreshServerConfig()
+    } catch (err) {
+      const apiErrors = err.response?.data?.errors
+      if (Array.isArray(apiErrors) && apiErrors.length > 0) {
+        toast.error(apiErrors[0].msg || 'Failed to save server configuration')
+      } else {
+        toast.error(err.response?.data?.error || 'Failed to save server configuration')
+      }
+    } finally {
+      setServerSaving(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex justify-center py-16">
@@ -89,7 +284,7 @@ export default function Settings() {
   }
 
   return (
-    <div className="max-w-2xl space-y-6 animate-fade-in">
+    <div className="max-w-4xl space-y-6 animate-fade-in">
       {/* Recording retention settings */}
       <form onSubmit={saveSettings}>
         <SettingSection title="Recording & Retention" icon={HardDrive}>
@@ -178,6 +373,143 @@ export default function Settings() {
           <button type="submit" disabled={saving} className="btn-primary">
             {saving ? <Loader2 size={14} className="animate-spin inline mr-2" /> : <Save size={14} className="inline mr-2" />}
             Save Settings
+          </button>
+        </div>
+      </form>
+
+      {/* Server setup */}
+      <form onSubmit={saveServerConfig}>
+        <SettingSection title="Server Setup (Managed .env)" icon={ServerCog}>
+          <div className="rounded-lg border border-warning/40 bg-warning/10 p-3">
+            <div className="flex items-start gap-2 text-sm text-warning">
+              <AlertTriangle size={16} className="mt-0.5" />
+              <div>
+                Changes in this section write to <span className="font-mono">.env</span>. Most values here require a backend service restart before they become active.
+              </div>
+            </div>
+          </div>
+
+          {serverConfigError ? (
+            <div className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+              {serverConfigError}
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="label">Node Environment</label>
+                  <select
+                    className="input"
+                    value={serverConfig.node_env}
+                    onChange={e => setServerConfig(s => ({ ...s, node_env: e.target.value }))}
+                  >
+                    <option value="production">production</option>
+                    <option value="development">development</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Backend Port</label>
+                  <input
+                    type="number"
+                    className="input"
+                    min={1}
+                    max={65535}
+                    value={serverConfig.port}
+                    onChange={e => setServerConfig(s => ({ ...s, port: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="label">Public Port</label>
+                  <input
+                    type="number"
+                    className="input"
+                    min={1}
+                    max={65535}
+                    value={serverConfig.vms_port}
+                    onChange={e => setServerConfig(s => ({ ...s, vms_port: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="label">Segment Duration (sec)</label>
+                  <input
+                    type="number"
+                    className="input"
+                    min={10}
+                    max={86400}
+                    value={serverConfig.segment_duration}
+                    onChange={e => setServerConfig(s => ({ ...s, segment_duration: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="label">Public Base URL (for desktop config exports)</label>
+                <div className="relative">
+                  <Globe size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                  <input
+                    className="input pl-9"
+                    placeholder="https://vms.example.com"
+                    value={serverConfig.public_base_url}
+                    onChange={e => setServerConfig(s => ({ ...s, public_base_url: e.target.value }))}
+                  />
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Optional. If set, About and desktop export tools use this URL instead of browser auto-detection.
+                </p>
+              </div>
+
+              <div>
+                <label className="label">CORS Allowed Origins (comma-separated)</label>
+                <textarea
+                  className="input min-h-[92px]"
+                  placeholder="http://localhost:5173,https://vms.example.com"
+                  value={serverConfig.cors_origins}
+                  onChange={e => setServerConfig(s => ({ ...s, cors_origins: e.target.value }))}
+                />
+              </div>
+
+              <div className="rounded-lg border border-surface-500 bg-surface-800 p-3 space-y-2">
+                <div className="text-sm font-medium text-slate-200">Runtime Snapshot</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                  <div className="flex justify-between border-b border-surface-500 pb-1.5">
+                    <span className="text-slate-500">Active NODE_ENV</span>
+                    <span className="text-slate-200 font-mono">{runtimeConfig.node_env || 'n/a'}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-surface-500 pb-1.5">
+                    <span className="text-slate-500">Active Port</span>
+                    <span className="text-slate-200 font-mono">{runtimeConfig.port || 'n/a'}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-surface-500 pb-1.5">
+                    <span className="text-slate-500">Active Segment Duration</span>
+                    <span className="text-slate-200 font-mono">{runtimeConfig.segment_duration || 'n/a'}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-surface-500 pb-1.5">
+                    <span className="text-slate-500">.env Status</span>
+                    <span className="text-slate-200 font-mono">
+                      {serverMeta.envExists ? (serverMeta.envWritable ? 'writable' : 'read-only') : 'missing'}
+                    </span>
+                  </div>
+                </div>
+
+                {serverMeta.note && (
+                  <p className="text-xs text-slate-500">{serverMeta.note}</p>
+                )}
+              </div>
+            </>
+          )}
+        </SettingSection>
+
+        <div className="mt-4 flex items-center justify-between gap-3">
+          <p className={`text-xs ${restartNotice ? 'text-warning' : 'text-slate-500'}`}>
+            {restartNotice || 'Saved values are persisted to .env. Restart backend service after changing runtime fields.'}
+          </p>
+          <button
+            type="submit"
+            disabled={serverSaving || Boolean(serverConfigError) || !serverMeta.envWritable}
+            className="btn-primary"
+          >
+            {serverSaving ? <Loader2 size={14} className="animate-spin inline mr-2" /> : <Save size={14} className="inline mr-2" />}
+            Save Server Config
           </button>
         </div>
       </form>

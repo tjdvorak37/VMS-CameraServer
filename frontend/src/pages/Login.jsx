@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { Shield, Eye, EyeOff, Camera } from 'lucide-react'
+import { Shield, Eye, EyeOff, Camera, ServerCog, Loader2 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { setupApi } from '../services/api'
 
 export default function Login() {
   const { login } = useAuth()
@@ -10,6 +11,29 @@ export default function Login() {
   const [form, setForm] = useState({ username: '', password: '' })
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [setupLoading, setSetupLoading] = useState(true)
+  const [setupCompleted, setSetupCompleted] = useState(true)
+
+  useEffect(() => {
+    let isMounted = true
+
+    setupApi.status()
+      .then(res => {
+        if (!isMounted) return
+        setSetupCompleted(Boolean(res.data?.setupCompleted))
+      })
+      .catch(() => {
+        if (!isMounted) return
+        toast.error('Unable to verify setup status')
+      })
+      .finally(() => {
+        if (isMounted) setSetupLoading(false)
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -44,66 +68,98 @@ export default function Login() {
           <p className="text-slate-400 mt-1">Video Management System</p>
         </div>
 
-        {/* Login card */}
+        {/* Login/setup card */}
         <div className="bg-surface-700 border border-surface-500 rounded-2xl p-8 shadow-2xl">
-          <h2 className="text-lg font-semibold text-slate-100 mb-6">Sign In</h2>
-
-          <form onSubmit={handleSubmit} className="space-y-5" autoComplete="on">
-            <div>
-              <label className="label">Username or Email</label>
-              <input
-                type="text"
-                className="input"
-                placeholder="admin"
-                autoComplete="username"
-                value={form.username}
-                onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
-                disabled={loading}
-              />
+          {setupLoading ? (
+            <div className="flex flex-col items-center justify-center gap-3 py-8 text-slate-300">
+              <Loader2 size={24} className="animate-spin text-accent" />
+              <span>Checking server setup...</span>
             </div>
-
-            <div>
-              <label className="label">Password</label>
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  className="input pr-10"
-                  placeholder="••••••••"
-                  autoComplete="current-password"
-                  value={form.password}
-                  onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-                  disabled={loading}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(v => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-                >
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
+          ) : !setupCompleted ? (
+            <div className="space-y-5">
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-warning/20 border border-warning/30">
+                <ServerCog size={22} className="text-warning" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-slate-100">Initial Setup Required</h2>
+                <p className="text-slate-400 mt-1 text-sm">
+                  This server has not been configured yet. Complete setup to create the first admin account.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn-primary w-full py-2.5 text-base"
+                onClick={() => navigate('/setup')}
+              >
+                Launch Setup Wizard
+              </button>
+              <div className="pt-4 border-t border-surface-500 text-xs text-slate-500 flex items-center gap-2">
+                <Camera size={12} />
+                <span>Setup can only be completed once for this server instance.</span>
               </div>
             </div>
+          ) : (
+            <>
+              <h2 className="text-lg font-semibold text-slate-100 mb-6">Sign In</h2>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="btn-primary w-full py-2.5 text-base mt-2"
-            >
-              {loading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Signing in...
-                </span>
-              ) : 'Sign In'}
-            </button>
-          </form>
+              <form onSubmit={handleSubmit} className="space-y-5" autoComplete="on">
+                <div>
+                  <label className="label">Username or Email</label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="admin"
+                    autoComplete="username"
+                    value={form.username}
+                    onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
+                    disabled={loading}
+                  />
+                </div>
 
-          <div className="mt-6 pt-5 border-t border-surface-500">
-            <div className="flex items-center gap-2 text-xs text-slate-500">
-              <Camera size={12} />
-              <span>Default: admin / Admin@1234 (change after first login)</span>
-            </div>
-          </div>
+                <div>
+                  <label className="label">Password</label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      className="input pr-10"
+                      placeholder="••••••••"
+                      autoComplete="current-password"
+                      value={form.password}
+                      onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                      disabled={loading}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(v => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="btn-primary w-full py-2.5 text-base mt-2"
+                >
+                  {loading ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Signing in...
+                    </span>
+                  ) : 'Sign In'}
+                </button>
+              </form>
+
+              <div className="mt-6 pt-5 border-t border-surface-500">
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <Camera size={12} />
+                  <span>Use the admin credentials configured during initial setup.</span>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         <p className="text-center text-xs text-slate-600 mt-6">

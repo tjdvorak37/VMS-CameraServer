@@ -6,6 +6,7 @@ const { body, validationResult } = require('express-validator');
 const { getDb } = require('../config/database');
 const config = require('../config/config');
 const { authenticate } = require('../middleware/auth');
+const { isSetupCompleted } = require('../utils/systemSettings');
 
 // POST /api/auth/login
 router.post(
@@ -22,6 +23,13 @@ router.post(
 
     const { username, password } = req.body;
     const db = getDb();
+
+    if (!isSetupCompleted(db)) {
+      return res.status(403).json({
+        error: 'Initial setup is required before login',
+        setupRequired: true,
+      });
+    }
 
     try {
       const user = db.prepare(

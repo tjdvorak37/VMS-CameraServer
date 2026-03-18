@@ -61,7 +61,14 @@ function startStream(camera) {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-  proc.stderr.on('data', () => {}); // suppress FFmpeg logs (verbose)
+  const recentFfmpegLines = [];
+  proc.stderr.on('data', (data) => {
+    const lines = data.toString().split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    lines.forEach(line => {
+      recentFfmpegLines.push(line);
+      if (recentFfmpegLines.length > 25) recentFfmpegLines.shift();
+    });
+  });
 
   proc.on('exit', (code) => {
     console.log(`[StreamManager] Stream for camera ${id} exited (code ${code})`);
@@ -75,6 +82,11 @@ function startStream(camera) {
 
     // Restart after delay (unless deliberately stopped)
     if (code !== null && code !== 0) {
+      if (recentFfmpegLines.length > 0) {
+        const tail = recentFfmpegLines.slice(-8).join('\n');
+        console.error(`[StreamManager] Last FFmpeg output for camera ${id}:\n${tail}`);
+      }
+
       const restartDelay = 5000;
       setTimeout(() => {
         try {

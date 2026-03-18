@@ -32,18 +32,23 @@ router.get('/', authenticate, (req, res) => {
 
 // GET /api/cameras/:id
 router.get('/:id', authenticate, (req, res) => {
-  const db = getDb();
-  const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
-  if (!camera) return res.status(404).json({ error: 'Camera not found' });
+  try {
+    const db = getDb();
+    const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+    if (!camera) return res.status(404).json({ error: 'Camera not found' });
 
-  // Strip credentials for non-admin
-  if (req.user.role === 'viewer') {
-    delete camera.password;
-    delete camera.username;
-    delete camera.rtsp_url;
+    // Strip credentials for non-admin
+    if (req.user.role === 'viewer') {
+      delete camera.password;
+      delete camera.username;
+      delete camera.rtsp_url;
+    }
+
+    return res.json(camera);
+  } catch (err) {
+    console.error('[Cameras] Get camera error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
   }
-
-  return res.json(camera);
 });
 
 // POST /api/cameras  (admin/operator)
@@ -101,38 +106,43 @@ router.put(
   authenticate,
   requireRole('admin', 'operator'),
   (req, res) => {
-    const db = getDb();
-    const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
-    if (!camera) return res.status(404).json({ error: 'Camera not found' });
+    try {
+      const db = getDb();
+      const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+      if (!camera) return res.status(404).json({ error: 'Camera not found' });
 
-    const allowedFields = [
-      'name', 'ip_address', 'port', 'rtsp_url', 'username', 'password',
-      'protocol', 'manufacturer', 'model', 'location', 'recording_enabled',
-      'snapshot_url', 'onvif_port', 'resolution', 'fps',
-    ];
+      const allowedFields = [
+        'name', 'ip_address', 'port', 'rtsp_url', 'username', 'password',
+        'protocol', 'manufacturer', 'model', 'location', 'recording_enabled',
+        'snapshot_url', 'onvif_port', 'resolution', 'fps',
+      ];
 
-    const updates = {};
-    allowedFields.forEach(f => {
-      if (req.body[f] !== undefined) updates[f] = req.body[f];
-    });
+      const updates = {};
+      allowedFields.forEach(f => {
+        if (req.body[f] !== undefined) updates[f] = req.body[f];
+      });
 
-    if (Object.keys(updates).length > 0) {
-      const sets = Object.keys(updates).map(k => `${k} = ?`).join(', ');
-      db.prepare(`UPDATE cameras SET ${sets} WHERE id = ?`).run(...Object.values(updates), camera.id);
-    }
-
-    // Restart streams if RTSP URL changed
-    if (updates.rtsp_url || updates.recording_enabled !== undefined) {
-      const updatedCamera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(camera.id);
-      streamManager.stopStream(camera.id);
-      recordingManager.stopRecording(camera.id);
-      streamManager.startStream(updatedCamera);
-      if (updatedCamera.recording_enabled) {
-        recordingManager.startRecording(updatedCamera);
+      if (Object.keys(updates).length > 0) {
+        const sets = Object.keys(updates).map(k => `${k} = ?`).join(', ');
+        db.prepare(`UPDATE cameras SET ${sets} WHERE id = ?`).run(...Object.values(updates), camera.id);
       }
-    }
 
-    return res.json(db.prepare('SELECT * FROM cameras WHERE id = ?').get(camera.id));
+      // Restart streams if RTSP URL changed
+      if (updates.rtsp_url || updates.recording_enabled !== undefined) {
+        const updatedCamera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(camera.id);
+        streamManager.stopStream(camera.id);
+        recordingManager.stopRecording(camera.id);
+        streamManager.startStream(updatedCamera);
+        if (updatedCamera.recording_enabled) {
+          recordingManager.startRecording(updatedCamera);
+        }
+      }
+
+      return res.json(db.prepare('SELECT * FROM cameras WHERE id = ?').get(camera.id));
+    } catch (err) {
+      console.error('[Cameras] Update camera error:', err);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
   }
 );
 

@@ -15,6 +15,7 @@ const { getDb } = require('./config/database');
 
 // Routes
 const authRoutes       = require('./routes/auth');
+const setupRoutes      = require('./routes/setup');
 const userRoutes       = require('./routes/users');
 const cameraRoutes     = require('./routes/cameras');
 const streamRoutes     = require('./routes/streams');
@@ -91,6 +92,7 @@ app.use('/thumbnails', authenticate, express.static(config.THUMBNAILS_DIR));
 
 // ─── API Routes ─────────────────────────────────────────────────────────────
 app.use('/api/auth',       authRoutes);
+app.use('/api/setup',      setupRoutes);
 app.use('/api/users',      userRoutes);
 app.use('/api/cameras',    cameraRoutes);
 app.use('/api/streams',    streamRoutes);

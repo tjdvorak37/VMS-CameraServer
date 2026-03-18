@@ -33,6 +33,13 @@ export const authApi = {
   changePassword: (data) => api.post('/auth/change-password', data),
 }
 
+export const setupApi = {
+  status: () => api.get('/setup/status'),
+  complete: (data) => api.post('/setup/complete', data),
+  serverConfig: () => api.get('/setup/server-config'),
+  updateServerConfig: (data) => api.put('/setup/server-config', data),
+}
+
 export const cameraApi = {
   list: () => api.get('/cameras'),
   get: (id) => api.get(`/cameras/${id}`),

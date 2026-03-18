@@ -38,3 +38,13 @@ Skip service creation:
 ```cmd
 installer\windows\install-vms-server.cmd -SkipService
 ```
+
+## After installation
+
+1. Open `http://<server-ip>:3001/setup` in a browser.
+2. Complete the first-run setup wizard to create the initial admin account.
+3. Sign in at `http://<server-ip>:3001/login` with the credentials you configured.
+
+Notes:
+- If you place nginx/IIS in front of the backend, use that public URL instead of `:3001`.
+- If you later change runtime server values in **Settings > Server Setup**, restart the backend service.

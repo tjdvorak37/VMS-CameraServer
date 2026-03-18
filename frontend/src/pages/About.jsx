@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Search, BookOpen, Download, Copy } from 'lucide-react'
+import { dashboardApi } from '../services/api'
 
 const SYSTEMD_SERVICE = `[Unit]
 Description=VMS Camera Server
@@ -102,7 +103,7 @@ const ABOUT_SECTIONS = [
       'Dashboard telemetry, events, and camera status indicators provide baseline observability for day-to-day operations.',
     ],
     keyPoints: [
-      'Always rotate default admin credentials during initial deployment',
+      'Complete first-run setup wizard and secure admin account credentials',
       'Use reverse proxy TLS in production',
       'Back up database and recording metadata regularly',
     ],
@@ -158,8 +159,9 @@ const ABOUT_SECTIONS = [
           'Set trusted origins, JWT secret, retention policy, and any custom storage paths.',
         commands: [
           'cd /opt/VMS-CameraServer',
-          'sudo cp .env.example .env',
+          'sudo test -f .env || sudo cp .env.example .env',
           'sudo nano .env',
+          '# If setup.sh already created .env, edit it in place and keep generated JWT_SECRET',
           '# Set PORT=3001, NODE_ENV=production, CORS_ORIGINS=http://vms.local',
         ],
       },
@@ -214,11 +216,11 @@ const ABOUT_SECTIONS = [
       {
         title: 'First login and hardening checklist',
         description:
-          'Log in with the default admin account, rotate credentials, add cameras, and validate recording retention.',
+          'Complete the web setup wizard, sign in with your configured admin account, then finish hardening.',
         commands: [
-          'Open http://vms.local in a browser',
-          'Login: admin / Admin@1234',
-          'Immediately change password in Settings',
+          'Open http://vms.local/setup in a browser',
+          'Create your first admin account and finish setup',
+          'Sign in at http://vms.local/login with your configured credentials',
           'Enable HTTPS certificate (Lets Encrypt or internal PKI)',
         ],
       },
@@ -262,11 +264,31 @@ export default function About() {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('all')
   const [exportStatus, setExportStatus] = useState({ type: '', message: '' })
+  const [configuredPublicUrl, setConfiguredPublicUrl] = useState('')
+
+  useEffect(() => {
+    let isMounted = true
+
+    dashboardApi.settings()
+      .then(res => {
+        if (!isMounted) return
+        const configured = String(res.data?.public_base_url || '').trim()
+        if (configured) setConfiguredPublicUrl(configured.replace(/\/$/, ''))
+      })
+      .catch(() => {
+        // Keep browser-origin fallback when settings are unavailable.
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   const detectedServerUrl = useMemo(() => {
+    if (configuredPublicUrl) return configuredPublicUrl
     if (typeof window === 'undefined') return ''
     return window.location.origin.replace(/\/$/, '')
-  }, [])
+  }, [configuredPublicUrl])
 
   const categories = useMemo(() => {
     const values = Array.from(new Set(ABOUT_SECTIONS.map(section => section.category)))
@@ -381,8 +403,13 @@ export default function About() {
         </div>
 
         <div className="mt-3 p-3 rounded-lg border border-surface-500 bg-surface-800">
-          <p className="text-xs text-slate-500">Detected server URL</p>
+          <p className="text-xs text-slate-500">
+            {configuredPublicUrl ? 'Configured Public Base URL' : 'Detected server URL'}
+          </p>
           <p className="font-mono text-sm text-slate-200 mt-1 break-all">{detectedServerUrl || 'Unavailable'}</p>
+          {configuredPublicUrl && (
+            <p className="text-xs text-success mt-1">Using URL configured in Settings &gt; Server Setup.</p>
+          )}
         </div>
 
         <div className="mt-3 flex flex-wrap gap-2">

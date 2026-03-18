@@ -5,6 +5,51 @@ const config = require('./config');
 
 let db;
 
+/**
+ * Return existing column names for a table.
+ */
+function getTableColumns(db, tableName) {
+  return new Set(
+    db.prepare(`PRAGMA table_info(${tableName})`).all().map(col => col.name)
+  );
+}
+
+/**
+ * Add any missing columns for legacy installs.
+ */
+function ensureColumns(db, tableName, definitions) {
+  const existing = getTableColumns(db, tableName);
+
+  definitions.forEach(([columnName, columnDef]) => {
+    if (!existing.has(columnName)) {
+      db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDef}`);
+      console.log(`[DB] Added missing column: ${tableName}.${columnName}`);
+    }
+  });
+}
+
+/**
+ * Lightweight schema migrations for installs created by older versions.
+ */
+function runMigrations(db) {
+  ensureColumns(db, 'cameras', [
+    ['protocol', "TEXT DEFAULT 'RTSP'"],
+    ['manufacturer', 'TEXT'],
+    ['model', 'TEXT'],
+    ['location', 'TEXT'],
+    ['status', "TEXT DEFAULT 'offline'"],
+    ['recording_enabled', 'INTEGER DEFAULT 1'],
+    ['snapshot_url', 'TEXT'],
+    ['onvif_port', 'INTEGER DEFAULT 80'],
+    ['resolution', "TEXT DEFAULT '1920x1080'"],
+    ['fps', 'INTEGER DEFAULT 15'],
+    ['stream_pid', 'INTEGER'],
+    ['record_pid', 'INTEGER'],
+    ['last_seen', 'DATETIME'],
+    ['thumbnail_path', 'TEXT'],
+  ]);
+}
+
 function getDb() {
   if (!db) {
     // Ensure data directory exists
@@ -19,6 +64,7 @@ function getDb() {
     db.pragma('synchronous = NORMAL');
 
     initializeSchema(db);
+    runMigrations(db);
     seedDefaultAdmin(db);
   }
   return db;
@@ -116,14 +162,19 @@ function initializeSchema(db) {
 
 function seedDefaultAdmin(db) {
   const bcrypt = require('bcryptjs');
-  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
-  if (!existing) {
-    const hash = bcrypt.hashSync('Admin@1234', 12);
+  const crypto = require('crypto');
+  const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
+  let createdDefaultAdmin = false;
+
+  if (userCount === 0) {
+    const bootstrapPassword = crypto.randomBytes(24).toString('hex');
+    const hash = bcrypt.hashSync(bootstrapPassword, 12);
     db.prepare(`
       INSERT INTO users (username, email, password_hash, role)
       VALUES (?, ?, ?, ?)
     `).run('admin', 'admin@vms.local', hash, 'admin');
-    console.log('[DB] Default admin created — username: admin, password: Admin@1234');
+    createdDefaultAdmin = true;
+    console.log('[DB] Bootstrap admin created for initial setup.');
   }
 
   // Default system settings
@@ -134,11 +185,32 @@ function seedDefaultAdmin(db) {
     ['email_alerts', 'false'],
     ['smtp_host', ''],
     ['smtp_port', '587'],
+    ['public_base_url', ''],
+    ['setup_completed', 'true'],
+    ['setup_completed_at', ''],
   ];
   const upsert = db.prepare(`
     INSERT OR IGNORE INTO system_settings (key, value) VALUES (?, ?)
   `);
   defaults.forEach(([k, v]) => upsert.run(k, v));
+
+  if (createdDefaultAdmin) {
+    db.prepare(`
+      INSERT INTO system_settings (key, value, updated_at)
+      VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(key) DO UPDATE SET
+        value = excluded.value,
+        updated_at = CURRENT_TIMESTAMP
+    `).run('setup_completed', 'false');
+
+    db.prepare(`
+      INSERT INTO system_settings (key, value, updated_at)
+      VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(key) DO UPDATE SET
+        value = excluded.value,
+        updated_at = CURRENT_TIMESTAMP
+    `).run('setup_completed_at', '');
+  }
 }
 
 module.exports = { getDb };
