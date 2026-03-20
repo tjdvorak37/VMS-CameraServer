@@ -32,6 +32,10 @@ function ensureColumns(db, tableName, definitions) {
  * Lightweight schema migrations for installs created by older versions.
  */
 function runMigrations(db) {
+  ensureColumns(db, 'users', [
+    ['must_change_password', 'INTEGER DEFAULT 0'],
+  ]);
+
   ensureColumns(db, 'cameras', [
     ['protocol', "TEXT DEFAULT 'RTSP'"],
     ['manufacturer', 'TEXT'],
@@ -79,6 +83,7 @@ function initializeSchema(db) {
       password_hash TEXT NOT NULL,
       role      TEXT NOT NULL DEFAULT 'viewer',
       is_active INTEGER NOT NULL DEFAULT 1,
+      must_change_password INTEGER NOT NULL DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       last_login DATETIME
     );

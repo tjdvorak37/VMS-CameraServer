@@ -9,7 +9,7 @@ const { authenticate, requireRole } = require('../middleware/auth');
 router.get('/', authenticate, requireRole('admin'), (req, res) => {
   const db = getDb();
   const users = db.prepare(
-    'SELECT id, username, email, role, is_active, created_at, last_login FROM users ORDER BY created_at DESC'
+    'SELECT id, username, email, role, is_active, must_change_password, created_at, last_login FROM users ORDER BY created_at DESC'
   ).all();
   return res.json(users);
 });
@@ -24,6 +24,7 @@ router.post(
     body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
     body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
     body('role').isIn(['admin', 'operator', 'viewer']).withMessage('Role must be admin, operator, or viewer'),
+    body('must_change_password').optional().isBoolean().withMessage('must_change_password must be true or false'),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -32,6 +33,7 @@ router.post(
     }
 
     const { username, email, password, role } = req.body;
+    const mustChangePassword = req.body.must_change_password ? 1 : 0;
     const db = getDb();
 
     try {
@@ -44,11 +46,11 @@ router.post(
 
       const hash = await bcrypt.hash(password, 12);
       const result = db.prepare(
-        'INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)'
-      ).run(username, email, hash, role);
+        'INSERT INTO users (username, email, password_hash, role, must_change_password) VALUES (?, ?, ?, ?, ?)'
+      ).run(username, email, hash, role, mustChangePassword);
 
       const user = db.prepare(
-        'SELECT id, username, email, role, is_active, created_at FROM users WHERE id = ?'
+        'SELECT id, username, email, role, is_active, must_change_password, created_at FROM users WHERE id = ?'
       ).get(result.lastInsertRowid);
 
       return res.status(201).json(user);
@@ -69,6 +71,7 @@ router.put(
     body('role').optional().isIn(['admin', 'operator', 'viewer']),
     body('is_active').optional().isBoolean(),
     body('password').optional().isLength({ min: 8 }),
+    body('must_change_password').optional().isBoolean(),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -93,9 +96,13 @@ router.put(
       if (req.body.email !== undefined) updates.email = req.body.email;
       if (req.body.role !== undefined) updates.role = req.body.role;
       if (req.body.is_active !== undefined) updates.is_active = req.body.is_active ? 1 : 0;
+      if (req.body.must_change_password !== undefined) updates.must_change_password = req.body.must_change_password ? 1 : 0;
 
       if (req.body.password) {
         updates.password_hash = await bcrypt.hash(req.body.password, 12);
+        if (req.body.must_change_password === undefined) {
+          updates.must_change_password = 0;
+        }
       }
 
       if (Object.keys(updates).length > 0) {
@@ -104,7 +111,7 @@ router.put(
       }
 
       const updated = db.prepare(
-        'SELECT id, username, email, role, is_active, created_at, last_login FROM users WHERE id = ?'
+        'SELECT id, username, email, role, is_active, must_change_password, created_at, last_login FROM users WHERE id = ?'
       ).get(user.id);
 
       return res.json(updated);

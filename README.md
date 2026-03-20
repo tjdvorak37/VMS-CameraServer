@@ -247,10 +247,20 @@ Output artifact:
 
 On the target Windows server:
 1. Extract `VMS-Server-Installer.zip`
-2. Run `INSTALL-WINDOWS-SERVER.cmd` as Administrator
-3. Follow prompts (default data drive is `E:`)
+2. Optional: run `VMS-SETUP-LAUNCHER.cmd` for a GUI launcher (one-click, walkthrough, or client install)
+3. Run `INSTALL-WINDOWS-SERVER.cmd` as Administrator for one-click provisioning
+4. Optional: run `INSTALL-WINDOWS-SERVER-WALKTHROUGH.cmd` for prompted proprietary values
 
-The installer script configures storage paths, environment, firewall, dependencies, and starts a Windows service.
+The server installer configures storage paths, environment, firewall, dependencies, Windows service, initial admin setup, and server URL settings.
+
+After server install:
+1. Open `C:\VMS-CameraServer\client-onboarding`
+2. Copy that folder to each user workstation
+3. Run `INSTALL-VMS-CLIENT.cmd` on each user device
+
+The client installer sets the desktop app URL so users connect to the server without manual configuration.
+
+If you import users from CSV during provisioning, imported users are marked for mandatory password reset on first login.
 
 For a mouse-first walkthrough on Windows 11, see `installer/windows/README-WINDOWS-11-GUI-SETUP.md`.
 

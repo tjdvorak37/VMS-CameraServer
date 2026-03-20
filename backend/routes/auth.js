@@ -61,6 +61,7 @@ router.post(
           username: user.username,
           email: user.email,
           role: user.role,
+          must_change_password: Boolean(user.must_change_password),
         },
       });
     } catch (err) {
@@ -78,6 +79,7 @@ router.get('/me', authenticate, (req, res) => {
       username: req.user.username,
       email: req.user.email,
       role: req.user.role,
+      must_change_password: Boolean(req.user.must_change_password),
     },
   });
 });
@@ -109,7 +111,7 @@ router.post(
       }
 
       const newHash = await bcrypt.hash(newPassword, 12);
-      db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, req.user.id);
+      db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(newHash, req.user.id);
 
       return res.json({ message: 'Password changed successfully' });
     } catch (err) {

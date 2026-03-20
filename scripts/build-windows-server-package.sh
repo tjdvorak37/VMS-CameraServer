@@ -41,11 +41,35 @@ rm -rf \
 cat > "$PKG_DIR/INSTALL-WINDOWS-SERVER.cmd" <<'EOF'
 @echo off
 setlocal
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0installer\windows\install-vms-server.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0installer\windows\install-vms-server.ps1" -Mode Quick -ConfigureNow
+endlocal
+EOF
+
+cat > "$PKG_DIR/INSTALL-WINDOWS-SERVER-WALKTHROUGH.cmd" <<'EOF'
+@echo off
+setlocal
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0installer\windows\install-vms-server.ps1" -Mode Guided -ConfigureNow
+endlocal
+EOF
+
+cat > "$PKG_DIR/INSTALL-WINDOWS-CLIENT.cmd" <<'EOF'
+@echo off
+setlocal
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0installer\windows\install-vms-client.ps1" -LaunchAfterInstall
+endlocal
+EOF
+
+cat > "$PKG_DIR/VMS-SETUP-LAUNCHER.cmd" <<'EOF'
+@echo off
+setlocal
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0installer\windows\vms-setup-launcher.ps1"
 endlocal
 EOF
 
 chmod +x "$PKG_DIR/INSTALL-WINDOWS-SERVER.cmd" || true
+chmod +x "$PKG_DIR/INSTALL-WINDOWS-SERVER-WALKTHROUGH.cmd" || true
+chmod +x "$PKG_DIR/INSTALL-WINDOWS-CLIENT.cmd" || true
+chmod +x "$PKG_DIR/VMS-SETUP-LAUNCHER.cmd" || true
 
 echo "[VMS] Creating zip archive..."
 mkdir -p "$OUT_ROOT"

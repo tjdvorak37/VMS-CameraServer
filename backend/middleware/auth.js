@@ -16,11 +16,21 @@ function authenticate(req, res, next) {
     const decoded = jwt.verify(token, config.JWT_SECRET);
     const db = getDb();
     const user = db.prepare(
-      'SELECT id, username, email, role, is_active FROM users WHERE id = ?'
+      'SELECT id, username, email, role, is_active, must_change_password FROM users WHERE id = ?'
     ).get(decoded.userId);
 
     if (!user || !user.is_active) {
       return res.status(401).json({ error: 'User not found or deactivated' });
+    }
+
+    const isAuthMe = req.baseUrl === '/api/auth' && req.path === '/me';
+    const isAuthPasswordChange = req.baseUrl === '/api/auth' && req.path === '/change-password';
+
+    if (user.must_change_password && !isAuthMe && !isAuthPasswordChange) {
+      return res.status(403).json({
+        error: 'Password reset required before accessing this resource',
+        passwordResetRequired: true,
+      });
     }
 
     req.user = user;

@@ -27,6 +27,7 @@ function UserModal({ user, onClose, onSave }) {
     password: '',
     role: user?.role || 'viewer',
     is_active: user?.is_active !== 0,
+    must_change_password: user?.must_change_password === 1 || user?.must_change_password === true,
   })
   const [saving, setSaving] = useState(false)
   const isEdit = !!user
@@ -114,14 +115,36 @@ function UserModal({ user, onClose, onSave }) {
             </select>
           </div>
           {isEdit && (
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 rounded accent-blue-500"
+                  checked={form.is_active}
+                  onChange={e => setForm(f => ({ ...f, is_active: e.target.checked }))}
+                />
+                <span className="text-sm text-slate-300">Account active</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 rounded accent-blue-500"
+                  checked={form.must_change_password}
+                  onChange={e => setForm(f => ({ ...f, must_change_password: e.target.checked }))}
+                />
+                <span className="text-sm text-slate-300">Require password reset on next login</span>
+              </label>
+            </div>
+          )}
+          {!isEdit && (
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
                 className="w-4 h-4 rounded accent-blue-500"
-                checked={form.is_active}
-                onChange={e => setForm(f => ({ ...f, is_active: e.target.checked }))}
+                checked={form.must_change_password}
+                onChange={e => setForm(f => ({ ...f, must_change_password: e.target.checked }))}
               />
-              <span className="text-sm text-slate-300">Account active</span>
+              <span className="text-sm text-slate-300">Require password reset on first login</span>
             </label>
           )}
           <div className="flex gap-3 pt-2 border-t border-surface-500">
@@ -199,6 +222,7 @@ export default function UserManagement() {
                 <th>Email</th>
                 <th>Role</th>
                 <th>Status</th>
+                <th>Password Policy</th>
                 <th>Last Login</th>
                 <th className="text-right">Actions</th>
               </tr>
@@ -235,6 +259,9 @@ export default function UserManagement() {
                         ? <span className="badge-online">Active</span>
                         : <span className="badge-offline">Deactivated</span>
                       }
+                    </td>
+                    <td className="text-xs text-slate-400">
+                      {u.must_change_password ? 'Reset required' : 'Standard'}
                     </td>
                     <td className="text-xs text-slate-500">
                       {u.last_login ? format(parseISO(u.last_login), 'MMM d, yyyy HH:mm') : 'Never'}

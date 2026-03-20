@@ -44,7 +44,10 @@ On the Windows 11 machine:
 5. Open the extracted folder.
 
 Inside the extracted folder, you should see:
+- `VMS-SETUP-LAUNCHER.cmd`
 - `INSTALL-WINDOWS-SERVER.cmd`
+- `INSTALL-WINDOWS-SERVER-WALKTHROUGH.cmd`
+- `INSTALL-WINDOWS-CLIENT.cmd`
 - the `installer` folder
 - the `backend` and `frontend` folders
 
@@ -54,6 +57,12 @@ Screenshot placeholder:
 ---
 
 ## 3. Run the installer as Administrator
+
+Fastest option:
+1. Double-click `VMS-SETUP-LAUNCHER.cmd`
+2. Click either **One-Click Server Install + Provision** or **Guided Server Walkthrough**
+
+Direct option:
 
 1. Right-click `INSTALL-WINDOWS-SERVER.cmd`.
 2. Click **Run as administrator**.
@@ -68,6 +77,8 @@ What the installer does:
 - Builds frontend assets if needed
 - Opens Windows Firewall for TCP port `3001`
 - Creates and starts the `VMSCameraServer` Windows service
+- Completes initial setup automatically in one-click mode
+- Generates `C:\VMS-CameraServer\client-onboarding` for user-device installs
 
 Screenshot placeholder:
 - Right-click menu on `INSTALL-WINDOWS-SERVER.cmd` with **Run as administrator** highlighted.
@@ -96,10 +107,10 @@ Screenshot placeholder:
 ## 5. Open the app in the browser
 
 On the Windows machine itself:
-- Open your browser and go to `http://localhost:3001/setup`
+- Open your browser and go to `http://localhost:3001/login`
 
 From another PC on the same network:
-- Open `http://<windows-pc-ip>:3001/setup`
+- Open `http://<windows-pc-ip>:3001/login`
 
 If the page does not load:
 - Confirm the `VMSCameraServer` service is running.
@@ -107,32 +118,22 @@ If the page does not load:
 - Confirm no other app is already using port `3001`.
 
 Screenshot placeholder:
-- Browser open to `http://localhost:3001/setup` on the Windows 11 machine.
+- Browser open to `http://localhost:3001/login` on the Windows 11 machine.
 
 ---
 
-## 6. Complete first-run setup
+## 6. Guided walkthrough option for proprietary values
 
-The first page you should use is `/setup`, not `/login`.
+If you need prompts during install for proprietary details (admin account, URL, limits), run:
 
-In the setup wizard:
+1. `INSTALL-WINDOWS-SERVER-WALKTHROUGH.cmd`
+2. Fill in prompts for:
+   - Admin username/email/password
+   - Public base URL
+   - CORS origins
+   - Optional users CSV import
 
-1. Create your first admin username.
-2. Enter the admin email address.
-3. Create a strong admin password.
-4. Review retention and system limit defaults.
-5. Finish setup.
-
-After that:
-- Go to `/login`
-- Sign in with the admin account you just created
-
-Important:
-- The installer does **not** rely on a fixed default password anymore.
-- If any old message mentions `admin / Admin@1234`, ignore it and use the setup wizard flow.
-
-Screenshot placeholder:
-- First-run setup wizard showing the admin account form.
+Use this guided mode when one-click defaults are not appropriate for your site.
 
 ---
 
@@ -161,7 +162,17 @@ Screenshot placeholder:
 
 ---
 
-## 8. Restart the service after runtime changes
+## 8. Deploy desktop app to non-server user devices
+
+After server install:
+
+1. Open `C:\VMS-CameraServer\client-onboarding`
+2. Copy that folder to each user PC
+3. Run `INSTALL-VMS-CLIENT.cmd` on each user PC
+
+This installs the desktop app and points it at your server automatically.
+
+## 9. Restart the service after runtime changes
 
 If you change runtime settings in **Settings > Server Setup**, restart the service.
 
@@ -182,7 +193,7 @@ Screenshot placeholder:
 
 ---
 
-## 9. Recommended post-install checks
+## 10. Recommended post-install checks
 
 After installation, verify the basics:
 
@@ -195,7 +206,7 @@ After installation, verify the basics:
 
 ---
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 ### Installer says Node.js is missing
 - Install Node.js 22 LTS.
@@ -210,10 +221,15 @@ After installation, verify the basics:
 ### No `E:` drive exists
 - Use the advanced installer guide and specify a custom data drive.
 
-### Browser cannot open `http://localhost:3001/setup`
+### Browser cannot open `http://localhost:3001/login`
 - Confirm `VMSCameraServer` is running.
 - Confirm Windows Firewall rule exists for port `3001`.
 - Confirm another app is not already using port `3001`.
+
+### Users cannot connect from desktop app
+- Confirm `Public Base URL` is correct in `Settings > Server Setup`.
+- Recopy the latest `client-onboarding` folder to user PCs.
+- Re-run `INSTALL-VMS-CLIENT.cmd` on the user device.
 
 ### Other PCs cannot connect
 - Use the Windows machine IP address instead of `localhost`.
@@ -222,7 +238,7 @@ After installation, verify the basics:
 
 ---
 
-## 11. When to use the advanced Windows guide instead
+## 12. When to use the advanced Windows guide instead
 
 Use `README-WINDOWS-INSTALLER.md` instead of this guide if you need:
 - A different install directory

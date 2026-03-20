@@ -36,13 +36,36 @@ function readConfig() {
   }
 }
 
+function readBundledConfig() {
+  const candidates = [
+    path.join(path.dirname(process.execPath), 'server-config.json'),
+    path.join(__dirname, 'server-config.json'),
+  ];
+
+  for (const filePath of candidates) {
+    try {
+      if (!fs.existsSync(filePath)) continue;
+      const raw = fs.readFileSync(filePath, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.serverUrl === 'string') {
+        return parsed;
+      }
+    } catch (_) {
+      // Ignore invalid optional config files.
+    }
+  }
+
+  return {};
+}
+
 function writeConfig(config) {
   fs.writeFileSync(configPath(), JSON.stringify(config, null, 2));
 }
 
 function getServerUrl() {
   const cfg = readConfig();
-  return cfg.serverUrl || DEFAULT_SERVER_URL;
+  const bundled = readBundledConfig();
+  return cfg.serverUrl || bundled.serverUrl || DEFAULT_SERVER_URL;
 }
 
 function normalizeServerUrl(url) {

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { Shield, Eye, EyeOff, Camera, ServerCog, Loader2 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { setupApi } from '../services/api'
+import { authApi, setupApi } from '../services/api'
 
 export default function Login() {
   const { login } = useAuth()
@@ -13,6 +13,10 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const [setupLoading, setSetupLoading] = useState(true)
   const [setupCompleted, setSetupCompleted] = useState(true)
+  const [forceResetOpen, setForceResetOpen] = useState(false)
+  const [resetForm, setResetForm] = useState({ newPassword: '', confirmPassword: '' })
+  const [resetSaving, setResetSaving] = useState(false)
+  const [lastLoginPassword, setLastLoginPassword] = useState('')
 
   useEffect(() => {
     let isMounted = true
@@ -43,13 +47,53 @@ export default function Login() {
     }
     setLoading(true)
     try {
-      await login(form.username, form.password)
+      const loggedInUser = await login(form.username, form.password)
+      if (loggedInUser?.must_change_password) {
+        setLastLoginPassword(form.password)
+        setForceResetOpen(true)
+        toast.error('Password reset required before continuing')
+        return
+      }
       navigate('/dashboard')
     } catch (err) {
       const msg = err.response?.data?.error || 'Login failed. Please check your credentials.'
       toast.error(msg)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleForceResetSubmit = async (e) => {
+    e.preventDefault()
+
+    if (resetForm.newPassword.length < 8) {
+      toast.error('New password must be at least 8 characters')
+      return
+    }
+    if (resetForm.newPassword !== resetForm.confirmPassword) {
+      toast.error('New passwords do not match')
+      return
+    }
+
+    setResetSaving(true)
+    try {
+      await authApi.changePassword({
+        currentPassword: lastLoginPassword,
+        newPassword: resetForm.newPassword,
+      })
+
+      await login(form.username, resetForm.newPassword)
+
+      setForceResetOpen(false)
+      setResetForm({ newPassword: '', confirmPassword: '' })
+      setLastLoginPassword('')
+      toast.success('Password updated. Access granted.')
+      navigate('/dashboard')
+    } catch (err) {
+      const msg = err.response?.data?.error || 'Unable to update password'
+      toast.error(msg)
+    } finally {
+      setResetSaving(false)
     }
   }
 
@@ -166,6 +210,53 @@ export default function Login() {
           VMS Pro — Professional Video Management System © 2026
         </p>
       </div>
+
+      {forceResetOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 animate-fade-in">
+          <div className="w-full max-w-md bg-surface-700 border border-surface-500 rounded-2xl p-6 shadow-2xl space-y-4">
+            <h2 className="text-xl font-semibold text-slate-100">Temporary Password Detected</h2>
+            <p className="text-sm text-slate-400">
+              Your account requires a password update before you can access cameras and operations.
+            </p>
+
+            <form onSubmit={handleForceResetSubmit} className="space-y-3">
+              <div>
+                <label className="label">New Password</label>
+                <input
+                  type="password"
+                  className="input"
+                  value={resetForm.newPassword}
+                  onChange={e => setResetForm(f => ({ ...f, newPassword: e.target.value }))}
+                  minLength={8}
+                  autoComplete="new-password"
+                  required
+                />
+              </div>
+              <div>
+                <label className="label">Confirm New Password</label>
+                <input
+                  type="password"
+                  className="input"
+                  value={resetForm.confirmPassword}
+                  onChange={e => setResetForm(f => ({ ...f, confirmPassword: e.target.value }))}
+                  minLength={8}
+                  autoComplete="new-password"
+                  required
+                />
+              </div>
+
+              <button type="submit" disabled={resetSaving} className="btn-primary w-full py-2.5 text-base">
+                {resetSaving ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Updating password...
+                  </span>
+                ) : 'Set New Password'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

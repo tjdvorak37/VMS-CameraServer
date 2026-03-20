@@ -1,7 +1,19 @@
 param(
+  [ValidateSet('Quick', 'Guided')]
+  [string]$Mode = 'Quick',
+  [switch]$ConfigureNow,
   [string]$InstallDir = 'C:\VMS-CameraServer',
   [string]$DataDrive = 'E:',
   [string]$ServiceName = 'VMSCameraServer',
+  [string]$PublicBaseUrl = '',
+  [string]$CorsOrigins = '',
+  [string]$AdminUsername = 'admin',
+  [string]$AdminEmail = 'admin@vms.local',
+  [string]$AdminPassword = '',
+  [int]$RetentionDays = 30,
+  [int]$MaxCameras = 64,
+  [int]$SnapshotInterval = 60,
+  [string]$UsersCsvPath = '',
   [switch]$SkipService
 )
 
@@ -26,11 +38,243 @@ function Ensure-Command($name, $hint) {
   }
 }
 
+function Read-OptionalValue([string]$Label, [string]$DefaultValue) {
+  $prompt = if ([string]::IsNullOrWhiteSpace($DefaultValue)) {
+    "$Label"
+  } else {
+    "$Label [$DefaultValue]"
+  }
+
+  $value = Read-Host $prompt
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    return $DefaultValue
+  }
+  return $value.Trim()
+}
+
+function Read-OptionalInt([string]$Label, [int]$DefaultValue, [int]$Min, [int]$Max) {
+  while ($true) {
+    $candidate = Read-OptionalValue $Label ([string]$DefaultValue)
+    $parsed = 0
+    if ([int]::TryParse($candidate, [ref]$parsed) -and $parsed -ge $Min -and $parsed -le $Max) {
+      return $parsed
+    }
+    Write-Warn "$Label must be between $Min and $Max"
+  }
+}
+
+function Read-RequiredSecret([string]$Label) {
+  while ($true) {
+    $secure = Read-Host $Label -AsSecureString
+    $ptr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+    try {
+      $plain = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($ptr)
+    }
+    finally {
+      [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($plain)) {
+      return $plain.Trim()
+    }
+
+    Write-Warn "$Label cannot be empty"
+  }
+}
+
+function Wait-ForHealth([string]$BaseUrl, [int]$TimeoutSec = 90) {
+  $deadline = (Get-Date).AddSeconds($TimeoutSec)
+  $healthUrl = "$BaseUrl/api/health"
+
+  while ((Get-Date) -lt $deadline) {
+    try {
+      $res = Invoke-RestMethod -Method Get -Uri $healthUrl -TimeoutSec 5
+      if ($res.status -eq 'ok') {
+        return $true
+      }
+    }
+    catch {
+      Start-Sleep -Seconds 2
+    }
+  }
+
+  return $false
+}
+
+function Invoke-JsonPost([string]$Uri, $Payload, $Headers = @{}) {
+  Invoke-RestMethod -Method Post -Uri $Uri -ContentType 'application/json' -Body ($Payload | ConvertTo-Json -Depth 8) -Headers $Headers
+}
+
+function Invoke-JsonPut([string]$Uri, $Payload, $Headers = @{}) {
+  Invoke-RestMethod -Method Put -Uri $Uri -ContentType 'application/json' -Body ($Payload | ConvertTo-Json -Depth 8) -Headers $Headers
+}
+
+function New-ClientOnboardingPackage([string]$InstallPath, [string]$ServerUrl) {
+  $onboardingDir = Join-Path $InstallPath 'client-onboarding'
+  New-Item -Path $onboardingDir -ItemType Directory -Force | Out-Null
+
+  $desktopInstallerSource = Join-Path $InstallPath 'desktop-client\VMS-Desktop-Client-Setup.exe'
+  if (Test-Path $desktopInstallerSource) {
+    Copy-Item $desktopInstallerSource (Join-Path $onboardingDir 'VMS-Desktop-Client-Setup.exe') -Force
+  } else {
+    Write-Warn 'Desktop client installer not found in package. Build desktop-client installer before creating the server bundle for full onboarding output.'
+  }
+
+  $clientInstallScriptSource = Join-Path $InstallPath 'installer\windows\install-vms-client.ps1'
+  $clientInstallCmdSource = Join-Path $InstallPath 'installer\windows\install-vms-client.cmd'
+
+  if (Test-Path $clientInstallScriptSource) {
+    Copy-Item $clientInstallScriptSource (Join-Path $onboardingDir 'install-vms-client.ps1') -Force
+  }
+  if (Test-Path $clientInstallCmdSource) {
+    Copy-Item $clientInstallCmdSource (Join-Path $onboardingDir 'INSTALL-VMS-CLIENT.cmd') -Force
+  }
+
+  $serverConfig = @{
+    app = 'VMS Desktop Client'
+    version = 1
+    serverUrl = $ServerUrl
+    generatedAt = (Get-Date).ToString('o')
+  } | ConvertTo-Json -Depth 5
+
+  Set-Content -Path (Join-Path $onboardingDir 'server-config.json') -Value $serverConfig -Encoding UTF8
+
+  $template = @"
+username,email,password,role
+operator1,operator1@company.local,ChangeMe123!,operator
+viewer1,viewer1@company.local,ChangeMe123!,viewer
+"@
+  Set-Content -Path (Join-Path $onboardingDir 'users-template.csv') -Value $template -Encoding ASCII
+
+  $readme = @"
+VMS Client Onboarding Package
+
+1. Optional: edit users-template.csv and import users from the server installer using -UsersCsvPath.
+  1a. If users were imported, temporary passwords are in provisioned-user-credentials.csv and must be rotated at first login.
+2. Copy this folder to user devices.
+3. On each user device run INSTALL-VMS-CLIENT.cmd.
+4. The desktop client opens already pointed to: $ServerUrl
+
+Manual URL fallback:
+- Open VMS Desktop Client
+- Connection Settings
+- Enter: $ServerUrl
+"@
+  Set-Content -Path (Join-Path $onboardingDir 'README.txt') -Value $readme -Encoding ASCII
+
+  return $onboardingDir
+}
+
+function Import-ProvisionUsers([string]$CsvPath, [string]$BaseUrl, [string]$AuthToken, [string]$InstallPath) {
+  if ([string]::IsNullOrWhiteSpace($CsvPath)) {
+    return @{ created = 0; credentialsPath = '' }
+  }
+
+  if (-not (Test-Path $CsvPath)) {
+    throw "Users CSV not found: $CsvPath"
+  }
+
+  $rows = Import-Csv -Path $CsvPath
+  if ($rows.Count -eq 0) {
+    return @{ created = 0; credentialsPath = '' }
+  }
+
+  $created = 0
+  $credentials = @()
+  foreach ($row in $rows) {
+    $username = [string]$row.username
+    $email = [string]$row.email
+    $password = [string]$row.password
+    $role = [string]$row.role
+
+    if ([string]::IsNullOrWhiteSpace($username) -or [string]::IsNullOrWhiteSpace($email)) {
+      Write-Warn "Skipping invalid row in users CSV (username/email required)."
+      continue
+    }
+
+    if ([string]::IsNullOrWhiteSpace($password)) {
+      $password = New-RandomSecret 16
+    }
+
+    if ($role -notin @('admin', 'operator', 'viewer')) {
+      $role = 'viewer'
+    }
+
+    try {
+      Invoke-JsonPost "$BaseUrl/api/users" @{
+        username = $username.Trim()
+        email = $email.Trim()
+        password = $password
+        role = $role
+        must_change_password = $true
+      } @{ Authorization = "Bearer $AuthToken" } | Out-Null
+
+      $credentials += [PSCustomObject]@{
+        username = $username.Trim()
+        email = $email.Trim()
+        role = $role
+        temporary_password = $password
+        must_change_password = 'true'
+      }
+
+      $created += 1
+      Write-Info "Created user: $username"
+    }
+    catch {
+      Write-Warn "User create failed for $username: $($_.Exception.Message)"
+    }
+  }
+
+  $credentialsPath = ''
+  if ($credentials.Count -gt 0) {
+    $secureDir = Join-Path $InstallPath 'client-onboarding'
+    New-Item -Path $secureDir -ItemType Directory -Force | Out-Null
+    $credentialsPath = Join-Path $secureDir 'provisioned-user-credentials.csv'
+    $credentials | Export-Csv -Path $credentialsPath -NoTypeInformation -Encoding UTF8
+  }
+
+  return @{ created = $created; credentialsPath = $credentialsPath }
+}
+
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
   [Security.Principal.WindowsBuiltinRole]::Administrator
 )
 if (-not $isAdmin) {
   throw 'Run this installer as Administrator.'
+}
+
+if ($Mode -eq 'Guided') {
+  $ConfigureNow = $true
+}
+
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$sourceRoot = (Resolve-Path (Join-Path $scriptDir '..\..')).Path
+
+if ($Mode -eq 'Guided') {
+  Write-Host ''
+  Write-Host 'VMS Guided Provisioning' -ForegroundColor Yellow
+  Write-Host 'Press Enter to accept defaults.' -ForegroundColor Yellow
+  Write-Host ''
+
+  $InstallDir = Read-OptionalValue 'Install directory' $InstallDir
+  $DataDrive = Read-OptionalValue 'Data drive letter' $DataDrive
+  if ($DataDrive.Length -eq 1) { $DataDrive = "$DataDrive:" }
+  $ServiceName = Read-OptionalValue 'Windows service name' $ServiceName
+
+  $AdminUsername = Read-OptionalValue 'Admin username' $AdminUsername
+  $AdminEmail = Read-OptionalValue 'Admin email' $AdminEmail
+  $AdminPassword = Read-RequiredSecret 'Admin password'
+
+  $RetentionDays = Read-OptionalInt 'Retention days' $RetentionDays 1 3650
+  $MaxCameras = Read-OptionalInt 'Max cameras' $MaxCameras 1 1024
+  $SnapshotInterval = Read-OptionalInt 'Snapshot interval seconds' $SnapshotInterval 10 86400
+
+  $hostname = $env:COMPUTERNAME
+  $PublicBaseUrl = Read-OptionalValue 'Public base URL' ("http://$hostname:3001")
+  $CorsOrigins = Read-OptionalValue 'CORS origins (comma separated)' $PublicBaseUrl
+
+  $usersPrompt = Read-OptionalValue 'Optional users CSV path (blank to skip)' $UsersCsvPath
+  $UsersCsvPath = $usersPrompt
 }
 
 if ($DataDrive.Length -eq 1) {
@@ -53,9 +297,6 @@ $recordingsPathEnv = "$driveLetter:/VMSData/recordings"
 $streamsPathEnv = "$driveLetter:/VMSData/streams"
 $snapshotsPathEnv = "$driveLetter:/VMSData/snapshots"
 $thumbnailsPathEnv = "$driveLetter:/VMSData/thumbnails"
-
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$sourceRoot = (Resolve-Path (Join-Path $scriptDir '..\..')).Path
 
 Write-Info "Source package: $sourceRoot"
 Write-Info "Install directory: $InstallDir"
@@ -158,7 +399,7 @@ if (-not (Get-NetFirewallRule -DisplayName 'VMS TCP 3001' -ErrorAction SilentlyC
 }
 
 $launcherPath = Join-Path $InstallDir 'run-vms-server.cmd'
-$launcherContent = "@echo off`r`ncd /d \"%~dp0backend\"`r`nnode server.js`r`n"
+$launcherContent = "@echo off`r`ncd /d `"%~dp0backend`"`r`nnode server.js`r`n"
 Set-Content -Path $launcherPath -Value $launcherContent -Encoding ASCII
 
 if (-not $SkipService) {
@@ -172,7 +413,7 @@ if (-not $SkipService) {
     Start-Sleep -Seconds 2
   }
 
-  $binPath = "cmd.exe /c \"$launcherPath\""
+  $binPath = "cmd.exe /c `"$launcherPath`""
   & sc.exe create $ServiceName "binPath= $binPath" "start= auto" "DisplayName= VMS Camera Server" | Out-Null
   & sc.exe description $ServiceName 'VMS Camera Server backend service' | Out-Null
   & sc.exe start $ServiceName | Out-Null
@@ -181,11 +422,102 @@ if (-not $SkipService) {
   Write-Warn 'SkipService was set. Service creation skipped.'
 }
 
+$baseUrl = 'http://localhost:3001'
+$provisioningRan = $false
+$createdUsersCount = 0
+$provisionedCredentialsPath = ''
+
+if ($ConfigureNow) {
+  Write-Info 'Waiting for backend health before provisioning...'
+  if (-not (Wait-ForHealth $baseUrl 120)) {
+    throw 'Backend did not become healthy in time. Provisioning aborted.'
+  }
+
+  $status = Invoke-RestMethod -Method Get -Uri "$baseUrl/api/setup/status"
+
+  if (-not $status.setupCompleted) {
+    if ([string]::IsNullOrWhiteSpace($AdminPassword)) {
+      if ($Mode -eq 'Guided') {
+        $AdminPassword = Read-RequiredSecret 'Admin password'
+      } else {
+        $AdminPassword = New-RandomSecret 20
+        Write-Warn "Admin password was auto-generated for one-click mode: $AdminPassword"
+      }
+    }
+
+    Write-Info 'Completing initial setup (admin + system limits)...'
+    Invoke-JsonPost "$baseUrl/api/setup/complete" @{
+      username = $AdminUsername
+      email = $AdminEmail
+      password = $AdminPassword
+      retention_days = $RetentionDays
+      max_cameras = $MaxCameras
+      snapshot_interval = $SnapshotInterval
+    } | Out-Null
+    Write-Ok 'Initial setup completed automatically.'
+  } else {
+    Write-Warn 'Setup already completed. Skipping setup completion step.'
+  }
+
+  if ([string]::IsNullOrWhiteSpace($PublicBaseUrl)) {
+    $hostname = $env:COMPUTERNAME
+    $PublicBaseUrl = "http://$hostname:3001"
+  }
+  if ([string]::IsNullOrWhiteSpace($CorsOrigins)) {
+    $CorsOrigins = $PublicBaseUrl
+  }
+
+  Write-Info 'Logging in as admin to apply server configuration and import users...'
+  $login = Invoke-JsonPost "$baseUrl/api/auth/login" @{
+    username = $AdminUsername
+    password = $AdminPassword
+  }
+
+  $token = [string]$login.token
+  if ([string]::IsNullOrWhiteSpace($token)) {
+    throw 'Admin login token was not returned. Cannot continue provisioning.'
+  }
+
+  Invoke-JsonPut "$baseUrl/api/setup/server-config" @{
+    public_base_url = $PublicBaseUrl
+    cors_origins = $CorsOrigins
+  } @{ Authorization = "Bearer $token" } | Out-Null
+  Write-Ok 'Server public URL and CORS configuration updated.'
+
+  $importResult = Import-ProvisionUsers $UsersCsvPath $baseUrl $token $InstallDir
+  $createdUsersCount = [int]$importResult.created
+  $provisionedCredentialsPath = [string]$importResult.credentialsPath
+  if ($createdUsersCount -gt 0) {
+    Write-Ok "Created $createdUsersCount users from CSV."
+  }
+
+  $onboardingDir = New-ClientOnboardingPackage $InstallDir $PublicBaseUrl
+  Write-Ok "Client onboarding package created: $onboardingDir"
+
+  $provisioningRan = $true
+}
+
 Write-Ok 'Installation complete.'
 Write-Host ''
 Write-Host "URL: http://localhost:3001" -ForegroundColor Green
 Write-Host "Install path: $InstallDir" -ForegroundColor Green
 Write-Host "Data path: $dataRoot" -ForegroundColor Green
 Write-Host ''
-Write-Host 'Next step: open http://localhost:3001/setup and complete first-run setup.' -ForegroundColor Yellow
-Write-Host 'Then sign in with the admin account created in the setup wizard.' -ForegroundColor Yellow
+
+if ($provisioningRan) {
+  Write-Host "Admin username: $AdminUsername" -ForegroundColor Green
+  Write-Host "Admin email: $AdminEmail" -ForegroundColor Green
+  Write-Host "Public base URL: $PublicBaseUrl" -ForegroundColor Green
+  if ($createdUsersCount -gt 0) {
+    Write-Host "Users created from CSV: $createdUsersCount" -ForegroundColor Green
+    if (-not [string]::IsNullOrWhiteSpace($provisionedCredentialsPath)) {
+      Write-Host "Temporary credentials file: $provisionedCredentialsPath" -ForegroundColor Yellow
+      Write-Host 'Distribute temporary passwords securely and delete this file after onboarding.' -ForegroundColor Yellow
+    }
+  }
+  Write-Host "Desktop onboarding package: $InstallDir\\client-onboarding" -ForegroundColor Yellow
+  Write-Host 'Copy that folder to user devices and run INSTALL-VMS-CLIENT.cmd there.' -ForegroundColor Yellow
+} else {
+  Write-Host 'Next step: open http://localhost:3001/login and complete provisioning manually if needed.' -ForegroundColor Yellow
+  Write-Host 'Use installer/windows/install-vms-server-walkthrough.cmd for guided proprietary setup prompts.' -ForegroundColor Yellow
+}
