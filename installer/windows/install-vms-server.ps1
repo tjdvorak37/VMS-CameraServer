@@ -445,7 +445,7 @@ if (-not $SkipService) {
   }
 
   $binPath = "cmd.exe /c `"$launcherPath`""
-  $createOutput = & sc.exe create $ServiceName "binPath= $binPath" "start= auto" "DisplayName= VMS Camera Server" 2>&1
+  $createOutput = & sc.exe create $ServiceName 'binPath=' $binPath 'start=' 'auto' 'DisplayName=' 'VMS Camera Server' 2>&1
   if ($LASTEXITCODE -ne 0) {
     throw "Failed to create Windows service '$ServiceName'. sc.exe output: $($createOutput -join ' | ')"
   }
