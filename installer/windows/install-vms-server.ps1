@@ -302,6 +302,14 @@ if ($DataDrive -notmatch '^[A-Za-z]:$') {
   throw 'DataDrive must be a drive letter such as V: or D:'
 }
 
+$logicalDisk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$DataDrive'" -ErrorAction SilentlyContinue
+if (-not $logicalDisk) {
+  throw "DataDrive $DataDrive was not found on this system."
+}
+if ($logicalDisk.DriveType -eq 4 -and -not $SkipService) {
+  throw "DataDrive $DataDrive is a mapped network drive. Windows services running as LocalSystem usually cannot access mapped drive letters. Use a local fixed disk for DataDrive, or run with -SkipService and start backend manually under a user account with access."
+}
+
 $driveLetter = $DataDrive.Substring(0, 1).ToUpper()
 $dataRoot = "$DataDrive\VMSData"
 $dbDir = "$dataRoot\db"
@@ -417,7 +425,9 @@ if (-not (Get-NetFirewallRule -DisplayName 'VMS TCP 3001' -ErrorAction SilentlyC
 }
 
 $launcherPath = Join-Path $InstallDir 'run-vms-server.cmd'
-$launcherContent = "@echo off`r`ncd /d `"%~dp0backend`"`r`nnode server.js`r`n"
+$backendLogDir = Join-Path $InstallDir 'backend\logs'
+$backendLogPath = Join-Path $backendLogDir 'server.log'
+$launcherContent = "@echo off`r`nsetlocal`r`nif not exist `"%~dp0backend\logs`" mkdir `"%~dp0backend\logs`"`r`ncd /d `"%~dp0backend`"`r`nnode server.js >> `"%~dp0backend\logs\server.log`" 2>&1`r`n"
 Set-Content -Path $launcherPath -Value $launcherContent -Encoding ASCII
 
 if (-not $SkipService) {
@@ -435,6 +445,14 @@ if (-not $SkipService) {
   & sc.exe create $ServiceName "binPath= $binPath" "start= auto" "DisplayName= VMS Camera Server" | Out-Null
   & sc.exe description $ServiceName 'VMS Camera Server backend service' | Out-Null
   & sc.exe start $ServiceName | Out-Null
+
+  Start-Sleep -Seconds 3
+  $serviceState = (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)
+  if (-not $serviceState -or $serviceState.Status -ne 'Running') {
+    $stateLabel = if ($serviceState) { [string]$serviceState.Status } else { 'NotFound' }
+    throw "Service $ServiceName is not running after start (state: $stateLabel). Check backend log at $backendLogPath"
+  }
+
   Write-Ok "Service started: $ServiceName"
 } else {
   Write-Warn 'SkipService was set. Service creation skipped.'
@@ -448,6 +466,20 @@ $provisionedCredentialsPath = ''
 if ($ConfigureNow) {
   Write-Info 'Waiting for backend health before provisioning...'
   if (-not (Wait-ForHealth $baseUrl 120)) {
+    if (-not $SkipService) {
+      $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+      if ($svc) {
+        Write-Warn "Service state at health timeout: $($svc.Status)"
+      }
+    }
+
+    if (Test-Path $backendLogPath) {
+      Write-Warn "Backend log tail ($backendLogPath):"
+      Get-Content $backendLogPath -Tail 40 | ForEach-Object { Write-Host $_ -ForegroundColor Yellow }
+    } else {
+      Write-Warn "Backend log not found at $backendLogPath"
+    }
+
     throw 'Backend did not become healthy in time. Provisioning aborted.'
   }
 
