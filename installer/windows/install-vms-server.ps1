@@ -433,6 +433,8 @@ $backendLogPath = Join-Path $backendLogDir 'server.log'
 $launcherContent = "@echo off`r`nsetlocal`r`nif not exist `"%~dp0backend\logs`" mkdir `"%~dp0backend\logs`"`r`ncd /d `"%~dp0backend`"`r`nnode server.js >> `"%~dp0backend\logs\server.log`" 2>&1`r`n"
 Set-Content -Path $launcherPath -Value $launcherContent -Encoding ASCII
 
+$backendStartedOutsideService = $false
+
 if (-not $SkipService) {
   Write-Info "Configuring Windows service: $ServiceName"
 
@@ -459,17 +461,29 @@ if (-not $SkipService) {
 
   $startOutput = & sc.exe start $ServiceName 2>&1
   if ($LASTEXITCODE -ne 0) {
-    throw "Failed to start service '$ServiceName'. sc.exe output: $($startOutput -join ' | '). Check backend log at $backendLogPath"
+    $startText = $startOutput -join ' | '
+    if ($startText -match 'FAILED 1053') {
+      Write-Warn "Service start returned 1053 for '$ServiceName'. Falling back to direct backend start for provisioning."
+      Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', $launcherPath) -WorkingDirectory $InstallDir -WindowStyle Hidden | Out-Null
+      Start-Sleep -Seconds 3
+      $backendStartedOutsideService = $true
+    } else {
+      throw "Failed to start service '$ServiceName'. sc.exe output: $startText. Check backend log at $backendLogPath"
+    }
   }
 
-  Start-Sleep -Seconds 3
-  $serviceState = (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)
-  if (-not $serviceState -or $serviceState.Status -ne 'Running') {
-    $stateLabel = if ($serviceState) { [string]$serviceState.Status } else { 'NotFound' }
-    throw "Service $ServiceName is not running after start (state: $stateLabel). Check backend log at $backendLogPath"
-  }
+  if (-not $backendStartedOutsideService) {
+    Start-Sleep -Seconds 3
+    $serviceState = (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)
+    if (-not $serviceState -or $serviceState.Status -ne 'Running') {
+      $stateLabel = if ($serviceState) { [string]$serviceState.Status } else { 'NotFound' }
+      throw "Service $ServiceName is not running after start (state: $stateLabel). Check backend log at $backendLogPath"
+    }
 
-  Write-Ok "Service started: $ServiceName"
+    Write-Ok "Service started: $ServiceName"
+  } else {
+    Write-Warn "Backend started outside Windows service for provisioning only. Review service configuration after install."
+  }
 } else {
   Write-Warn 'SkipService was set. Service creation skipped.'
 }
@@ -482,7 +496,7 @@ $provisionedCredentialsPath = ''
 if ($ConfigureNow) {
   Write-Info 'Waiting for backend health before provisioning...'
   if (-not (Wait-ForHealth $baseUrl 120)) {
-    if (-not $SkipService) {
+    if (-not $SkipService -and -not $backendStartedOutsideService) {
       $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
       if ($svc) {
         Write-Warn "Service state at health timeout: $($svc.Status)"
