@@ -41,28 +41,56 @@ rm -rf \
 cat > "$PKG_DIR/INSTALL-WINDOWS-SERVER.cmd" <<'EOF'
 @echo off
 setlocal
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0installer\windows\install-vms-server.ps1" -Mode Quick -ConfigureNow
+set SCRIPT_DIR=%~dp0
+call "%SCRIPT_DIR%installer\windows\install-vms-server.cmd" %*
+if errorlevel 1 (
+  echo.
+  echo [VMS] INSTALL-WINDOWS-SERVER failed. Review messages above.
+  pause
+  exit /b 1
+)
 endlocal
 EOF
 
 cat > "$PKG_DIR/INSTALL-WINDOWS-SERVER-WALKTHROUGH.cmd" <<'EOF'
 @echo off
 setlocal
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0installer\windows\install-vms-server.ps1" -Mode Guided -ConfigureNow
+set SCRIPT_DIR=%~dp0
+call "%SCRIPT_DIR%installer\windows\install-vms-server-walkthrough.cmd" %*
+if errorlevel 1 (
+  echo.
+  echo [VMS] INSTALL-WINDOWS-SERVER-WALKTHROUGH failed. Review messages above.
+  pause
+  exit /b 1
+)
 endlocal
 EOF
 
 cat > "$PKG_DIR/INSTALL-WINDOWS-CLIENT.cmd" <<'EOF'
 @echo off
 setlocal
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0installer\windows\install-vms-client.ps1" -LaunchAfterInstall
+set SCRIPT_DIR=%~dp0
+call "%SCRIPT_DIR%installer\windows\install-vms-client.cmd" %*
+if errorlevel 1 (
+  echo.
+  echo [VMS] INSTALL-WINDOWS-CLIENT failed. Review messages above.
+  pause
+  exit /b 1
+)
 endlocal
 EOF
 
 cat > "$PKG_DIR/VMS-SETUP-LAUNCHER.cmd" <<'EOF'
 @echo off
 setlocal
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0installer\windows\vms-setup-launcher.ps1"
+set SCRIPT_DIR=%~dp0
+call "%SCRIPT_DIR%installer\windows\vms-setup-launcher.cmd" %*
+if errorlevel 1 (
+  echo.
+  echo [VMS] VMS-SETUP-LAUNCHER failed. Review messages above.
+  pause
+  exit /b 1
+)
 endlocal
 EOF
 

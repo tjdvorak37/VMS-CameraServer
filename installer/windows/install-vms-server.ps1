@@ -250,6 +250,24 @@ if ($Mode -eq 'Guided') {
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $sourceRoot = (Resolve-Path (Join-Path $scriptDir '..\..')).Path
 
+$requiredPackagePaths = @(
+  'backend\package.json',
+  'frontend\package.json',
+  'installer\windows\install-vms-server.ps1',
+  '.env.example'
+)
+
+$missingPackagePaths = @()
+foreach ($relativePath in $requiredPackagePaths) {
+  if (-not (Test-Path (Join-Path $sourceRoot $relativePath))) {
+    $missingPackagePaths += $relativePath
+  }
+}
+
+if ($missingPackagePaths.Count -gt 0) {
+  throw "Invalid installer location. Could not find expected package files under source root '$sourceRoot'. Launch the installer from the extracted VMS-Server-Installer folder (for example: VMS-SETUP-LAUNCHER.cmd or INSTALL-WINDOWS-SERVER-WALKTHROUGH.cmd). Missing: $($missingPackagePaths -join ', ')"
+}
+
 if ($Mode -eq 'Guided') {
   Write-Host ''
   Write-Host 'VMS Guided Provisioning' -ForegroundColor Yellow
