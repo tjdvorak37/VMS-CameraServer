@@ -445,9 +445,22 @@ if (-not $SkipService) {
   }
 
   $binPath = "cmd.exe /c `"$launcherPath`""
-  & sc.exe create $ServiceName "binPath= $binPath" "start= auto" "DisplayName= VMS Camera Server" | Out-Null
-  & sc.exe description $ServiceName 'VMS Camera Server backend service' | Out-Null
-  & sc.exe start $ServiceName | Out-Null
+  $createOutput = & sc.exe create $ServiceName "binPath= $binPath" "start= auto" "DisplayName= VMS Camera Server" 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    throw "Failed to create Windows service '$ServiceName'. sc.exe output: $($createOutput -join ' | ')"
+  }
+
+  $descriptionOutput = & sc.exe description $ServiceName 'VMS Camera Server backend service' 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    throw "Failed to set description for service '$ServiceName'. sc.exe output: $($descriptionOutput -join ' | ')"
+  }
+
+  Start-Sleep -Seconds 1
+
+  $startOutput = & sc.exe start $ServiceName 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    throw "Failed to start service '$ServiceName'. sc.exe output: $($startOutput -join ' | '). Check backend log at $backendLogPath"
+  }
 
   Start-Sleep -Seconds 3
   $serviceState = (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)
