@@ -30,8 +30,21 @@ function Normalize-ServerUrl([string]$Value) {
 }
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$resolvedInstallExeCandidates = @()
 if ([string]::IsNullOrWhiteSpace($InstallExePath)) {
-  $InstallExePath = Join-Path $scriptDir 'VMS-Desktop-Client-Setup.exe'
+  $installExeCandidates = @(
+    (Join-Path $scriptDir 'VMS-Desktop-Client-Setup.exe'),
+    (Join-Path $scriptDir '..\..\desktop-client\VMS-Desktop-Client-Setup.exe')
+  )
+
+  foreach ($candidate in $installExeCandidates) {
+    $resolved = [System.IO.Path]::GetFullPath($candidate)
+    $resolvedInstallExeCandidates += $resolved
+    if (Test-Path $resolved) {
+      $InstallExePath = $resolved
+      break
+    }
+  }
 }
 
 $configPath = Join-Path $scriptDir 'server-config.json'
@@ -55,6 +68,10 @@ while ([string]::IsNullOrWhiteSpace($ServerUrl)) {
 }
 
 if (-not (Test-Path $InstallExePath)) {
+  if ($resolvedInstallExeCandidates.Count -gt 0) {
+    throw "Desktop installer not found. Searched: $($resolvedInstallExeCandidates -join '; ')"
+  }
+
   throw "Desktop installer not found: $InstallExePath"
 }
 
