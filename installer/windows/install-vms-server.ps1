@@ -430,6 +430,7 @@ if (-not (Get-NetFirewallRule -DisplayName 'VMS TCP 3001' -ErrorAction SilentlyC
 $launcherPath = Join-Path $InstallDir 'run-vms-server.cmd'
 $backendLogDir = Join-Path $InstallDir 'backend\logs'
 $backendLogPath = Join-Path $backendLogDir 'server.log'
+$startupTaskName = "${ServiceName}-Startup"
 $launcherContent = "@echo off`r`nsetlocal`r`nif not exist `"%~dp0backend\logs`" mkdir `"%~dp0backend\logs`"`r`ncd /d `"%~dp0backend`"`r`nnode server.js >> `"%~dp0backend\logs\server.log`" 2>&1`r`n"
 Set-Content -Path $launcherPath -Value $launcherContent -Encoding ASCII
 
@@ -464,6 +465,18 @@ if (-not $SkipService) {
     $startText = $startOutput -join ' | '
     if ($startText -match 'FAILED 1053') {
       Write-Warn "Service start returned 1053 for '$ServiceName'. Falling back to direct backend start for provisioning."
+
+      try {
+        $taskAction = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c `"$launcherPath`""
+        $taskTrigger = New-ScheduledTaskTrigger -AtStartup
+        $taskPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        Register-ScheduledTask -TaskName $startupTaskName -Action $taskAction -Trigger $taskTrigger -Principal $taskPrincipal -Force | Out-Null
+        Write-Ok "Registered startup task for reboot auto-start: $startupTaskName"
+      }
+      catch {
+        Write-Warn "Could not register startup task '$startupTaskName': $($_.Exception.Message)"
+      }
+
       Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', $launcherPath) -WorkingDirectory $InstallDir -WindowStyle Hidden | Out-Null
       Start-Sleep -Seconds 3
       $backendStartedOutsideService = $true
@@ -597,6 +610,11 @@ if ($provisioningRan) {
   }
   Write-Host "Desktop onboarding package: $InstallDir\\client-onboarding" -ForegroundColor Yellow
   Write-Host 'Copy that folder to user devices and run INSTALL-VMS-CLIENT.cmd there.' -ForegroundColor Yellow
+
+  if ($backendStartedOutsideService) {
+    Write-Host "Startup fallback task: $startupTaskName" -ForegroundColor Yellow
+    Write-Host 'This task starts backend automatically at reboot because Windows service start returned 1053.' -ForegroundColor Yellow
+  }
 } else {
   Write-Host 'Next step: open http://localhost:3001/login and complete provisioning manually if needed.' -ForegroundColor Yellow
   Write-Host 'Use installer/windows/install-vms-server-walkthrough.cmd for guided proprietary setup prompts.' -ForegroundColor Yellow
