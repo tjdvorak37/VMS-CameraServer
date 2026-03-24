@@ -301,6 +301,9 @@ if ($DataDrive.Length -eq 1) {
 if ($DataDrive -notmatch '^[A-Za-z]:$') {
   throw 'DataDrive must be a drive letter such as V: or D:'
 }
+if ($ServiceName -notmatch '^[A-Za-z0-9_-]+$') {
+  throw "ServiceName '$ServiceName' is invalid. Use only letters, numbers, underscore, or dash (example: VMSCarroll or VMS_Carroll)."
+}
 
 $logicalDisk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$DataDrive'" -ErrorAction SilentlyContinue
 if (-not $logicalDisk) {
