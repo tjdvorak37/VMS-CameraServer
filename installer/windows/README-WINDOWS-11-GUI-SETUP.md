@@ -11,9 +11,9 @@ This guide assumes:
 - You have Administrator access on the Windows 11 machine.
 - Node.js 22 LTS is installed.
 - FFmpeg is installed and available in PATH.
-- You have a data drive ready as `E:` if you want to use the default storage layout.
+- You have a data drive ready as `V:` if you want to use the default storage layout.
 
-If you do not have an `E:` drive or need custom install options, use the advanced guide in `README-WINDOWS-INSTALLER.md` instead.
+If you do not have a `V:` drive or need custom install options, use the advanced guide in `README-WINDOWS-INSTALLER.md` instead.
 
 ---
 
@@ -25,11 +25,11 @@ Before running the installer:
 2. Install **Node.js 22 LTS** from the official Node.js website.
 3. Install **FFmpeg** and make sure `ffmpeg.exe` is available from anywhere in Command Prompt.
 4. Confirm the machine has enough free space for recordings.
-5. If you plan to keep recordings on a second drive, make sure that drive is attached and visible in File Explorer as `E:`.
+5. If you plan to keep recordings on a second drive, make sure that drive is attached and visible in File Explorer as `V:`.
 
 Tip:
 - You can check the drive letter in **File Explorer > This PC**.
-- If the drive letter is different, use the advanced installer guide instead of this GUI-only walkthrough.
+- If the drive letter is different, use the guided walkthrough or the advanced installer guide to choose another drive.
 
 ---
 
@@ -71,7 +71,7 @@ Direct option:
 
 What the installer does:
 - Copies the app into `C:\VMS-CameraServer`
-- Creates storage folders under `E:\VMSData`
+- Creates storage folders under `V:\VMSData`
 - Generates `.env` files with production values
 - Installs backend dependencies
 - Builds frontend assets if needed
@@ -128,6 +128,7 @@ If you need prompts during install for proprietary details (admin account, URL, 
 
 1. `INSTALL-WINDOWS-SERVER-WALKTHROUGH.cmd`
 2. Fill in prompts for:
+   - Data drive letter for recordings and storage
    - Admin username/email/password
    - Public base URL
    - CORS origins
@@ -218,8 +219,8 @@ After installation, verify the basics:
 - Make sure `ffmpeg.exe` is in PATH.
 - Run the installer again.
 
-### No `E:` drive exists
-- Use the advanced installer guide and specify a custom data drive.
+### No `V:` drive exists
+- Use the guided walkthrough or the advanced installer guide and specify a custom data drive.
 
 ### Browser cannot open `http://localhost:3001/login`
 - Confirm `VMSCameraServer` is running.

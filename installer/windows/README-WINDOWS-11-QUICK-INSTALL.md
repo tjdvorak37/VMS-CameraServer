@@ -5,7 +5,7 @@ This is the shortest Windows 11 setup path for VMS Camera Server using the packa
 Use this if:
 - You want the fastest install checklist.
 - You are okay with default paths.
-- You have an `E:` drive available for data.
+- You have a `V:` drive available for data.
 
 If you need custom paths or installer arguments, use `README-WINDOWS-INSTALLER.md`.
 
@@ -45,12 +45,14 @@ If you need custom paths or installer arguments, use `README-WINDOWS-INSTALLER.m
 
 The packaged installer normally:
 - installs to `C:\VMS-CameraServer`
-- stores data under `E:\VMSData`
+- stores data under `V:\VMSData`
 - opens Windows Firewall for TCP `3001`
 - creates the `VMSCameraServer` Windows service
 - auto-completes setup with admin defaults (one-click mode)
 - creates a `client-onboarding` folder for user devices
 - supports CSV user provisioning with forced first-login password reset
+
+If your storage drive is not `V:`, use the guided walkthrough or run the installer with `-DataDrive`.
 
 ---
 

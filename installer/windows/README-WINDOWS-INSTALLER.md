@@ -5,7 +5,8 @@
 `install-vms-server.cmd` installs VMS Camera Server on Windows 11/Windows Server:
 
 - Copies app files to `C:\VMS-CameraServer`
-- Uses your data drive for database and recordings (default `E:`)
+- Keeps the backend and launcher on `C:\VMS-CameraServer`
+- Uses your data drive for database and recordings (default `V:`)
 - Generates `.env` with production values
 - Installs backend dependencies
 - Uses existing frontend dist (or builds if missing)
@@ -20,7 +21,7 @@
 - Run installer as Administrator
 - Node.js 22 LTS installed
 - FFmpeg installed and in PATH
-- 2nd data drive prepared (default `E:`)
+- Data drive prepared for storage (default `V:`)
 
 ## Default run
 
@@ -30,6 +31,8 @@ Double-click:
 
 This runs one-click mode (`-Mode Quick -ConfigureNow`).
 
+One-click mode uses `C:\VMS-CameraServer` for the app and `V:\VMSData` for the database, recordings, streams, snapshots, and thumbnails.
+
 For guided prompts (walkthrough mode), use:
 
 `installer\windows\install-vms-server-walkthrough.cmd`
@@ -37,6 +40,8 @@ For guided prompts (walkthrough mode), use:
 Or launch a branded GUI menu:
 
 `installer\windows\vms-setup-launcher.cmd`
+
+Guided mode prompts for the data drive, and scripted runs can override it with `-DataDrive`.
 
 For a Windows 11 mouse-first walkthrough using the packaged installer bundle, see `README-WINDOWS-11-GUI-SETUP.md`.
 
@@ -47,7 +52,7 @@ For a shorter checklist version, see `README-WINDOWS-11-QUICK-INSTALL.md`.
 Run from an elevated command prompt:
 
 ```cmd
-installer\windows\install-vms-server.cmd -InstallDir "D:\Apps\VMS" -DataDrive "F:" -ServiceName "VMSCameraServer" -PublicBaseUrl "http://vms-hq:3001" -CorsOrigins "http://vms-hq:3001"
+installer\windows\install-vms-server.cmd -InstallDir "C:\VMS-CameraServer" -DataDrive "V:" -ServiceName "VMSCameraServer" -PublicBaseUrl "http://vms-hq:3001" -CorsOrigins "http://vms-hq:3001"
 ```
 
 Skip service creation:

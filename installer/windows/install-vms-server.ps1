@@ -3,7 +3,7 @@ param(
   [string]$Mode = 'Quick',
   [switch]$ConfigureNow,
   [string]$InstallDir = 'C:\VMS-CameraServer',
-  [string]$DataDrive = 'E:',
+  [string]$DataDrive = 'V:',
   [string]$ServiceName = 'VMSCameraServer',
   [string]$PublicBaseUrl = '',
   [string]$CorsOrigins = '',
@@ -221,7 +221,7 @@ function Import-ProvisionUsers([string]$CsvPath, [string]$BaseUrl, [string]$Auth
       Write-Info "Created user: $username"
     }
     catch {
-      Write-Warn "User create failed for $username: $($_.Exception.Message)"
+      Write-Warn "User create failed for ${username}: $($_.Exception.Message)"
     }
   }
 
@@ -258,7 +258,7 @@ if ($Mode -eq 'Guided') {
 
   $InstallDir = Read-OptionalValue 'Install directory' $InstallDir
   $DataDrive = Read-OptionalValue 'Data drive letter' $DataDrive
-  if ($DataDrive.Length -eq 1) { $DataDrive = "$DataDrive:" }
+  if ($DataDrive.Length -eq 1) { $DataDrive = "${DataDrive}:" }
   $ServiceName = Read-OptionalValue 'Windows service name' $ServiceName
 
   $AdminUsername = Read-OptionalValue 'Admin username' $AdminUsername
@@ -270,7 +270,7 @@ if ($Mode -eq 'Guided') {
   $SnapshotInterval = Read-OptionalInt 'Snapshot interval seconds' $SnapshotInterval 10 86400
 
   $hostname = $env:COMPUTERNAME
-  $PublicBaseUrl = Read-OptionalValue 'Public base URL' ("http://$hostname:3001")
+  $PublicBaseUrl = Read-OptionalValue 'Public base URL' ("http://${hostname}:3001")
   $CorsOrigins = Read-OptionalValue 'CORS origins (comma separated)' $PublicBaseUrl
 
   $usersPrompt = Read-OptionalValue 'Optional users CSV path (blank to skip)' $UsersCsvPath
@@ -278,10 +278,10 @@ if ($Mode -eq 'Guided') {
 }
 
 if ($DataDrive.Length -eq 1) {
-  $DataDrive = "$DataDrive:"
+  $DataDrive = "${DataDrive}:"
 }
 if ($DataDrive -notmatch '^[A-Za-z]:$') {
-  throw 'DataDrive must be a drive letter such as E: or D:'
+  throw 'DataDrive must be a drive letter such as V: or D:'
 }
 
 $driveLetter = $DataDrive.Substring(0, 1).ToUpper()
@@ -292,11 +292,11 @@ $streamsDir = "$dataRoot\streams"
 $snapshotsDir = "$dataRoot\snapshots"
 $thumbnailsDir = "$dataRoot\thumbnails"
 
-$dbPathEnv = "$driveLetter:/VMSData/db/vms.db"
-$recordingsPathEnv = "$driveLetter:/VMSData/recordings"
-$streamsPathEnv = "$driveLetter:/VMSData/streams"
-$snapshotsPathEnv = "$driveLetter:/VMSData/snapshots"
-$thumbnailsPathEnv = "$driveLetter:/VMSData/thumbnails"
+$dbPathEnv = "${driveLetter}:/VMSData/db/vms.db"
+$recordingsPathEnv = "${driveLetter}:/VMSData/recordings"
+$streamsPathEnv = "${driveLetter}:/VMSData/streams"
+$snapshotsPathEnv = "${driveLetter}:/VMSData/snapshots"
+$thumbnailsPathEnv = "${driveLetter}:/VMSData/thumbnails"
 
 Write-Info "Source package: $sourceRoot"
 Write-Info "Install directory: $InstallDir"
@@ -461,7 +461,7 @@ if ($ConfigureNow) {
 
   if ([string]::IsNullOrWhiteSpace($PublicBaseUrl)) {
     $hostname = $env:COMPUTERNAME
-    $PublicBaseUrl = "http://$hostname:3001"
+    $PublicBaseUrl = "http://${hostname}:3001"
   }
   if ([string]::IsNullOrWhiteSpace($CorsOrigins)) {
     $CorsOrigins = $PublicBaseUrl

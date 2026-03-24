@@ -17,14 +17,39 @@ function Start-VmsInstaller {
     return
   }
 
-  $escapedPath = '"' + $scriptPath + '"'
-  $argsLine = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $escapedPath) + $ScriptArgs
-
-  $startInfo = @{
-    FilePath = 'powershell.exe'
-    ArgumentList = $argsLine
-    WorkingDirectory = $scriptDir
-    WindowStyle = 'Normal'
+  $extension = [System.IO.Path]::GetExtension($scriptPath).ToLowerInvariant()
+  switch ($extension) {
+    '.ps1' {
+      $startInfo = @{
+        FilePath = 'powershell.exe'
+        ArgumentList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath) + $ScriptArgs
+        WorkingDirectory = $scriptDir
+        WindowStyle = 'Normal'
+      }
+      break
+    }
+    '.cmd' {
+      $startInfo = @{
+        FilePath = 'cmd.exe'
+        ArgumentList = @('/c', $scriptPath) + $ScriptArgs
+        WorkingDirectory = $scriptDir
+        WindowStyle = 'Normal'
+      }
+      break
+    }
+    '.bat' {
+      $startInfo = @{
+        FilePath = 'cmd.exe'
+        ArgumentList = @('/c', $scriptPath) + $ScriptArgs
+        WorkingDirectory = $scriptDir
+        WindowStyle = 'Normal'
+      }
+      break
+    }
+    default {
+      [System.Windows.Forms.MessageBox]::Show("Unsupported launcher target: $ScriptName", 'VMS Setup Launcher', 'OK', 'Error') | Out-Null
+      return
+    }
   }
 
   if ($RequireElevation) {
@@ -71,7 +96,7 @@ $btnServerQuick.BackColor = [System.Drawing.Color]::FromArgb(30, 41, 59)
 $btnServerQuick.ForeColor = [System.Drawing.Color]::White
 $btnServerQuick.FlatStyle = 'Flat'
 $btnServerQuick.Add_Click({
-  Start-VmsInstaller -ScriptName 'install-vms-server.ps1' -ScriptArgs @('-Mode', 'Quick', '-ConfigureNow') -RequireElevation
+  Start-VmsInstaller -ScriptName 'install-vms-server.cmd' -RequireElevation
 })
 $form.Controls.Add($btnServerQuick)
 
@@ -83,7 +108,7 @@ $btnServerGuided.BackColor = [System.Drawing.Color]::FromArgb(30, 41, 59)
 $btnServerGuided.ForeColor = [System.Drawing.Color]::White
 $btnServerGuided.FlatStyle = 'Flat'
 $btnServerGuided.Add_Click({
-  Start-VmsInstaller -ScriptName 'install-vms-server.ps1' -ScriptArgs @('-Mode', 'Guided', '-ConfigureNow') -RequireElevation
+  Start-VmsInstaller -ScriptName 'install-vms-server-walkthrough.cmd' -RequireElevation
 })
 $form.Controls.Add($btnServerGuided)
 
@@ -95,7 +120,7 @@ $btnClient.BackColor = [System.Drawing.Color]::FromArgb(30, 41, 59)
 $btnClient.ForeColor = [System.Drawing.Color]::White
 $btnClient.FlatStyle = 'Flat'
 $btnClient.Add_Click({
-  Start-VmsInstaller -ScriptName 'install-vms-client.ps1' -ScriptArgs @('-LaunchAfterInstall')
+  Start-VmsInstaller -ScriptName 'install-vms-client.cmd'
 })
 $form.Controls.Add($btnClient)
 
