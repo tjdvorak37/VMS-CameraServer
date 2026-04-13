@@ -19,8 +19,9 @@ function buildRtspUrl(camera) {
   if (!camera.username && !camera.password) return camera.rtsp_url;
   try {
     const url = new URL(camera.rtsp_url);
-    if (!url.username && camera.username) url.username = camera.username;
-    if (!url.password && camera.password) url.password = camera.password;
+    // Always prefer stored camera credentials over any stale credentials in rtsp_url.
+    if (camera.username) url.username = camera.username;
+    if (camera.password) url.password = camera.password;
     return url.toString();
   } catch (_) {
     return camera.rtsp_url;
