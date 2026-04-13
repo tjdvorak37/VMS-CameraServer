@@ -122,7 +122,11 @@ router.put(
 
       const updates = {};
       allowedFields.forEach(f => {
-        if (req.body[f] !== undefined) updates[f] = req.body[f];
+        if (req.body[f] !== undefined) {
+          const v = req.body[f];
+          // SQLite cannot bind booleans — convert to 0/1
+          updates[f] = typeof v === 'boolean' ? (v ? 1 : 0) : v;
+        }
       });
 
       if (Object.keys(updates).length > 0) {
