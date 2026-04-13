@@ -95,7 +95,10 @@ router.post(
       return res.status(201).json(camera);
     } catch (err) {
       console.error('[Cameras] Create error:', err);
-      return res.status(500).json({ error: 'Internal server error' });
+      return res.status(500).json({
+        error: 'Internal server error',
+        details: err?.message || String(err),
+      });
     }
   }
 );
@@ -159,7 +162,10 @@ router.put(
       return res.json(db.prepare('SELECT * FROM cameras WHERE id = ?').get(camera.id));
     } catch (err) {
       console.error('[Cameras] Update camera error:', err);
-      return res.status(500).json({ error: 'Internal server error' });
+      return res.status(500).json({
+        error: 'Internal server error',
+        details: err?.message || String(err),
+      });
     }
   }
 );
