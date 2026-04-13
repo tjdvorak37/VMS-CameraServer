@@ -66,15 +66,31 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // ─── Rate limiting ──────────────────────────────────────────────────────────
+const isLocalRequest = (req) => {
+  const candidates = [
+    req.ip,
+    req.socket?.remoteAddress,
+    req.connection?.remoteAddress,
+  ].filter(Boolean);
+
+  return candidates.some((value) => (
+    value === '127.0.0.1' ||
+    value === '::1' ||
+    value === '::ffff:127.0.0.1'
+  ));
+};
+
 app.use('/api/auth/login', rateLimit({
   windowMs: config.RATE_LIMIT_WINDOW,
   max: config.LOGIN_RATE_LIMIT_MAX,
+  skip: isLocalRequest,
   message: { error: 'Too many login attempts, please try again later' },
 }));
 
 app.use('/api/', rateLimit({
   windowMs: config.RATE_LIMIT_WINDOW,
   max: config.RATE_LIMIT_MAX,
+  skip: isLocalRequest,
   standardHeaders: true,
   legacyHeaders: false,
 }));
