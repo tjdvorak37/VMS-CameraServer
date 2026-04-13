@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Plus, Search, RefreshCw, Loader2, Camera, Wifi, WifiOff,
   Circle, Trash2, Edit3, Radio, StopCircle, Scan, Image
@@ -32,11 +32,19 @@ function AddEditModal({ camera, onClose, onSave }) {
     recording_enabled: camera?.recording_enabled !== 0,
   })
   const [saving, setSaving] = useState(false)
+  const rtspEdited = useRef(false)
 
   const updateRtsp = (field, value) => {
     const next = { ...form, [field]: value }
-    if (!camera && (field === 'ip_address')) {
-      next.rtsp_url = `rtsp://${value}:554/stream1`
+    if (!camera && !rtspEdited.current) {
+      const ip   = field === 'ip_address' ? value : next.ip_address
+      const port = field === 'port'       ? (value || 554) : (next.port || 554)
+      const user = field === 'username'   ? value : next.username
+      const pass = field === 'password'   ? value : next.password
+      const creds = user
+        ? `${encodeURIComponent(user)}${pass ? `:${encodeURIComponent(pass)}` : ''}@`
+        : ''
+      next.rtsp_url = `rtsp://${creds}${ip}:${port}/stream1`
     }
     setForm(next)
   }
@@ -91,7 +99,7 @@ function AddEditModal({ camera, onClose, onSave }) {
             </div>
             <div className="col-span-2">
               <label className="label">RTSP URL *</label>
-              <input className="input font-mono text-sm" value={form.rtsp_url} onChange={e => setForm(f => ({ ...f, rtsp_url: e.target.value }))} required />
+              <input className="input font-mono text-sm" value={form.rtsp_url} onChange={e => { rtspEdited.current = true; setForm(f => ({ ...f, rtsp_url: e.target.value })) }} required />
               <p className="text-xs text-slate-500 mt-1">e.g. rtsp://user:pass@192.168.1.100:554/stream1</p>
             </div>
             <div className="col-span-2">
@@ -105,11 +113,11 @@ function AddEditModal({ camera, onClose, onSave }) {
             </div>
             <div>
               <label className="label">Username</label>
-              <input className="input" value={form.username} onChange={e => setForm(f => ({ ...f, username: e.target.value }))} autoComplete="off" />
+              <input className="input" value={form.username} onChange={e => updateRtsp('username', e.target.value)} autoComplete="off" />
             </div>
             <div>
               <label className="label">Password</label>
-              <input type="password" className="input" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} autoComplete="new-password" />
+              <input type="password" className="input" value={form.password} onChange={e => updateRtsp('password', e.target.value)} autoComplete="new-password" />
             </div>
             <div>
               <label className="label">Manufacturer</label>
@@ -168,12 +176,14 @@ function AddEditModal({ camera, onClose, onSave }) {
   )
 }
 
-function DiscoverModal({ onAdd, onClose }) {
+function DiscoverModal({ onAdd, onAddBatch, onClose }) {
   const [scanning, setScanning] = useState(true)
   const [devices, setDevices] = useState([])
   const [profileFilter, setProfileFilter] = useState('avigilon-like')
   const [styleFilter, setStyleFilter] = useState('all')
   const [query, setQuery] = useState('')
+  const [selectedIps, setSelectedIps] = useState(new Set())
+  const [addingBatch, setAddingBatch] = useState(false)
 
   const runDiscovery = useCallback(() => {
     setScanning(true)
@@ -284,9 +294,44 @@ function DiscoverModal({ onAdd, onClose }) {
             </div>
           </div>
 
-          <p className="text-xs text-slate-500">
-            Showing {filteredDevices.length} of {devices.length} discovered device{devices.length !== 1 ? 's' : ''}
-          </p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-slate-500">
+              Showing {filteredDevices.length} of {devices.length} discovered device{devices.length !== 1 ? 's' : ''}
+            </p>
+            {filteredDevices.length > 0 && (
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    className="w-3.5 h-3.5 rounded accent-blue-500"
+                    checked={filteredDevices.every(d => selectedIps.has(d.ip))}
+                    onChange={e => {
+                      if (e.target.checked) setSelectedIps(new Set(filteredDevices.map(d => d.ip)))
+                      else setSelectedIps(new Set())
+                    }}
+                  />
+                  Select all
+                </label>
+                {selectedIps.size > 0 && (
+                  <button
+                    onClick={async () => {
+                      setAddingBatch(true)
+                      await onAddBatch(filteredDevices.filter(d => selectedIps.has(d.ip)))
+                      setAddingBatch(false)
+                      setSelectedIps(new Set())
+                    }}
+                    disabled={addingBatch}
+                    className="btn-primary text-xs py-1 px-3"
+                  >
+                    {addingBatch
+                      ? <Loader2 size={12} className="inline mr-1 animate-spin" />
+                      : <Plus size={12} className="inline mr-1" />}
+                    Add Selected ({selectedIps.size})
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
 
           {scanning ? (
             <div className="flex flex-col items-center py-8 gap-3">
@@ -312,20 +357,35 @@ function DiscoverModal({ onAdd, onClose }) {
             <div className="space-y-2 max-h-72 overflow-y-auto">
               {filteredDevices.map((d, i) => (
                 <div key={`${d.ip}-${i}`} className="flex items-center justify-between p-3 bg-surface-800 rounded-lg border border-surface-600">
-                  <div>
-                    <div className="text-sm font-medium text-slate-200">{d.manufacturer} {d.model}</div>
-                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                      <span className="text-xs text-slate-500 font-mono">{d.ip} • {d.protocol}</span>
-                      <span className="badge-info">{d.camera_style || 'Standard IP'}</span>
-                      <span className="badge bg-surface-500 text-slate-300">{d.device_type || 'IP Camera'}</span>
-                      <span className={d.is_avigilon_like ? 'badge-online' : 'badge bg-surface-500 text-slate-400'}>
-                        {d.profile_label || (d.is_avigilon_like ? 'Avigilon-like' : 'Other ONVIF')}
-                      </span>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 rounded accent-blue-500 flex-shrink-0"
+                      checked={selectedIps.has(d.ip)}
+                      onChange={e => {
+                        setSelectedIps(prev => {
+                          const next = new Set(prev)
+                          if (e.target.checked) next.add(d.ip)
+                          else next.delete(d.ip)
+                          return next
+                        })
+                      }}
+                    />
+                    <div>
+                      <div className="text-sm font-medium text-slate-200">{d.manufacturer} {d.model}</div>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        <span className="text-xs text-slate-500 font-mono">{d.ip} • {d.protocol}</span>
+                        <span className="badge-info">{d.camera_style || 'Standard IP'}</span>
+                        <span className="badge bg-surface-500 text-slate-300">{d.device_type || 'IP Camera'}</span>
+                        <span className={d.is_avigilon_like ? 'badge-online' : 'badge bg-surface-500 text-slate-400'}>
+                          {d.profile_label || (d.is_avigilon_like ? 'Avigilon-like' : 'Other ONVIF')}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   <button
-                    onClick={() => { onAdd(d); onClose() }}
-                    className="btn-primary text-xs py-1 px-3"
+                    onClick={() => onAdd(d)}
+                    className="btn-primary text-xs py-1 px-3 flex-shrink-0"
                   >
                     <Plus size={12} className="inline mr-1" />Add
                   </button>
@@ -422,6 +482,30 @@ export default function CameraManagement() {
     } finally {
       setProcessing(p => ({ ...p, [key]: false }))
     }
+  }
+
+  const handleAddBatch = async (devices) => {
+    let added = 0, failed = 0
+    for (const device of devices) {
+      try {
+        await cameraApi.create({
+          name: `${device.manufacturer} ${device.model}`,
+          ip_address: device.ip,
+          rtsp_url: device.suggested_rtsp || `rtsp://${device.ip}:554/stream1`,
+          port: device.port || 554,
+          manufacturer: device.manufacturer,
+          model: device.model,
+          onvif_port: device.onvif_port || 80,
+        })
+        added++
+      } catch {
+        failed++
+      }
+    }
+    if (added) toast.success(`${added} camera${added !== 1 ? 's' : ''} added`)
+    if (failed) toast.error(`${failed} camera${failed !== 1 ? 's' : ''} failed to add`)
+    fetchCameras()
+    setModal(null)
   }
 
   const filtered = cameras.filter(c =>
@@ -595,6 +679,7 @@ export default function CameraManagement() {
             })
             setModal('add')
           }}
+          onAddBatch={handleAddBatch}
           onClose={() => setModal(null)}
         />
       )}

@@ -13,6 +13,21 @@ const { getDb } = require('../config/database');
 const activeStreams = new Map();
 
 /**
+ * Build an effective RTSP URL, embedding stored credentials if not already in the URL.
+ */
+function buildRtspUrl(camera) {
+  if (!camera.username && !camera.password) return camera.rtsp_url;
+  try {
+    const url = new URL(camera.rtsp_url);
+    if (!url.username && camera.username) url.username = encodeURIComponent(camera.username);
+    if (!url.password && camera.password) url.password = encodeURIComponent(camera.password);
+    return url.toString();
+  } catch (_) {
+    return camera.rtsp_url;
+  }
+}
+
+/**
  * Ensure the stream directory exists for a camera.
  */
 function ensureStreamDir(cameraId) {
@@ -36,7 +51,7 @@ function startStream(camera) {
 
   const args = [
     '-rtsp_transport', 'tcp',
-    '-i', camera.rtsp_url,
+    '-i', buildRtspUrl(camera),
     '-c:v', 'libx264',
     '-preset', 'ultrafast',
     '-tune', 'zerolatency',
@@ -155,7 +170,7 @@ function captureSnapshot(camera) {
 
     const args = [
       '-rtsp_transport', 'tcp',
-      '-i', camera.rtsp_url,
+      '-i', buildRtspUrl(camera),
       '-vframes', '1',
       '-q:v', '2',
       '-y',
