@@ -127,14 +127,32 @@ router.put(
         db.prepare(`UPDATE cameras SET ${sets} WHERE id = ?`).run(...Object.values(updates), camera.id);
       }
 
-      // Restart streams if RTSP URL changed
-      if (updates.rtsp_url || updates.recording_enabled !== undefined) {
+      // Restart worker processes when connection/auth/recording settings change.
+      const streamRelevantChanged =
+        updates.rtsp_url !== undefined ||
+        updates.username !== undefined ||
+        updates.password !== undefined ||
+        updates.port !== undefined;
+
+      const recordingRelevantChanged =
+        streamRelevantChanged || updates.recording_enabled !== undefined;
+
+      if (streamRelevantChanged || recordingRelevantChanged) {
         const updatedCamera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(camera.id);
-        streamManager.stopStream(camera.id);
-        recordingManager.stopRecording(camera.id);
-        streamManager.startStream(updatedCamera);
-        if (updatedCamera.recording_enabled) {
-          recordingManager.startRecording(updatedCamera);
+        try {
+          if (streamRelevantChanged) {
+            streamManager.stopStream(camera.id);
+            streamManager.startStream(updatedCamera);
+          }
+
+          if (recordingRelevantChanged) {
+            recordingManager.stopRecording(camera.id);
+            if (updatedCamera.recording_enabled) {
+              recordingManager.startRecording(updatedCamera);
+            }
+          }
+        } catch (restartErr) {
+          console.error('[Cameras] Non-fatal restart error after update:', restartErr);
         }
       }
 
