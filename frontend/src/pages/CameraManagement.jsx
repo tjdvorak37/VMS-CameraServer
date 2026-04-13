@@ -53,7 +53,7 @@ function AddEditModal({ camera, onClose, onSave }) {
     e.preventDefault()
     setSaving(true)
     try {
-      if (camera) {
+      if (camera?.id) {
         await cameraApi.update(camera.id, form)
         toast.success('Camera updated')
       } else {
@@ -184,6 +184,8 @@ function DiscoverModal({ onAdd, onAddBatch, onClose }) {
   const [query, setQuery] = useState('')
   const [selectedIps, setSelectedIps] = useState(new Set())
   const [addingBatch, setAddingBatch] = useState(false)
+  const [sharedUsername, setSharedUsername] = useState('')
+  const [sharedPassword, setSharedPassword] = useState('')
 
   const runDiscovery = useCallback(() => {
     setScanning(true)
@@ -249,6 +251,20 @@ function DiscoverModal({ onAdd, onAddBatch, onClose }) {
       })
   }, [devices, profileFilter, styleFilter, query])
 
+  const buildRtspWithCreds = useCallback((device) => {
+    const baseUrl = device.suggested_rtsp || `rtsp://${device.ip}:554/stream1`
+    if (!sharedUsername) return baseUrl
+    try {
+      const url = new URL(baseUrl)
+      if (!url.username) url.username = encodeURIComponent(sharedUsername)
+      if (!url.password && sharedPassword) url.password = encodeURIComponent(sharedPassword)
+      return url.toString()
+    } catch {
+      const creds = `${encodeURIComponent(sharedUsername)}${sharedPassword ? `:${encodeURIComponent(sharedPassword)}` : ''}@`
+      return baseUrl.replace(/^rtsp:\/\//i, `rtsp://${creds}`)
+    }
+  }, [sharedUsername, sharedPassword])
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 animate-fade-in">
       <div className="bg-surface-700 border border-surface-500 rounded-2xl w-full max-w-3xl shadow-2xl">
@@ -294,6 +310,28 @@ function DiscoverModal({ onAdd, onAddBatch, onClose }) {
             </div>
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="label text-xs">Shared Username (optional)</label>
+              <input
+                className="input"
+                placeholder="Use for Add/Add Selected"
+                value={sharedUsername}
+                onChange={e => setSharedUsername(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="label text-xs">Shared Password (optional)</label>
+              <input
+                type="password"
+                className="input"
+                placeholder="Use for Add/Add Selected"
+                value={sharedPassword}
+                onChange={e => setSharedPassword(e.target.value)}
+              />
+            </div>
+          </div>
+
           <div className="flex items-center justify-between">
             <p className="text-xs text-slate-500">
               Showing {filteredDevices.length} of {devices.length} discovered device{devices.length !== 1 ? 's' : ''}
@@ -316,7 +354,10 @@ function DiscoverModal({ onAdd, onAddBatch, onClose }) {
                   <button
                     onClick={async () => {
                       setAddingBatch(true)
-                      await onAddBatch(filteredDevices.filter(d => selectedIps.has(d.ip)))
+                      await onAddBatch(
+                        filteredDevices.filter(d => selectedIps.has(d.ip)),
+                        { username: sharedUsername, password: sharedPassword, rtspForDevice: buildRtspWithCreds }
+                      )
                       setAddingBatch(false)
                       setSelectedIps(new Set())
                     }}
@@ -384,7 +425,11 @@ function DiscoverModal({ onAdd, onAddBatch, onClose }) {
                     </div>
                   </div>
                   <button
-                    onClick={() => onAdd(d)}
+                    onClick={() => onAdd(d, {
+                      username: sharedUsername,
+                      password: sharedPassword,
+                      rtsp_url: buildRtspWithCreds(d),
+                    })}
                     className="btn-primary text-xs py-1 px-3 flex-shrink-0"
                   >
                     <Plus size={12} className="inline mr-1" />Add
@@ -484,15 +529,20 @@ export default function CameraManagement() {
     }
   }
 
-  const handleAddBatch = async (devices) => {
+  const handleAddBatch = async (devices, options = {}) => {
+    const { username = '', password = '', rtspForDevice } = options
     let added = 0, failed = 0
     for (const device of devices) {
       try {
         await cameraApi.create({
           name: `${device.manufacturer} ${device.model}`,
           ip_address: device.ip,
-          rtsp_url: device.suggested_rtsp || `rtsp://${device.ip}:554/stream1`,
+          rtsp_url: typeof rtspForDevice === 'function'
+            ? rtspForDevice(device)
+            : (device.suggested_rtsp || `rtsp://${device.ip}:554/stream1`),
           port: device.port || 554,
+          username: username || undefined,
+          password: password || undefined,
           manufacturer: device.manufacturer,
           model: device.model,
           onvif_port: device.onvif_port || 80,
@@ -667,12 +717,14 @@ export default function CameraManagement() {
       )}
       {modal === 'discover' && (
         <DiscoverModal
-          onAdd={(device) => {
+          onAdd={(device, creds = {}) => {
             setEditCamera({
               name: `${device.manufacturer} ${device.model}`,
               ip_address: device.ip,
-              rtsp_url: device.suggested_rtsp,
+              rtsp_url: creds.rtsp_url || device.suggested_rtsp,
               port: device.port,
+              username: creds.username || '',
+              password: creds.password || '',
               manufacturer: device.manufacturer,
               model: device.model,
               onvif_port: device.onvif_port,
