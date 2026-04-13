@@ -37,6 +37,8 @@ function runMigrations(db) {
   ]);
 
   ensureColumns(db, 'cameras', [
+    ['username', 'TEXT'],
+    ['password', 'TEXT'],
     ['protocol', "TEXT DEFAULT 'RTSP'"],
     ['manufacturer', 'TEXT'],
     ['model', 'TEXT'],
