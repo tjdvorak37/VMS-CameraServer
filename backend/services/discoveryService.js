@@ -5,6 +5,7 @@
  */
 const dgram = require('dgram');
 const net = require('net');
+const os = require('os');
 const config = require('../config/config');
 
 // ONVIF WS-Discovery multicast
@@ -67,6 +68,111 @@ function safeDecode(value = '') {
 function extractTagValue(xml, tagName) {
   const match = xml.match(new RegExp(`${tagName}[^>]*>([^<]+)<`, 'i'));
   return match ? match[1].trim() : '';
+}
+
+function isValidIpv4(ip) {
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)
+    && ip.split('.').every(part => Number(part) >= 0 && Number(part) <= 255);
+}
+
+function ipToInt(ip) {
+  return ip.split('.').reduce((acc, part) => (acc << 8) + Number(part), 0) >>> 0;
+}
+
+function intToIp(intVal) {
+  return [
+    (intVal >>> 24) & 255,
+    (intVal >>> 16) & 255,
+    (intVal >>> 8) & 255,
+    intVal & 255,
+  ].join('.');
+}
+
+function normalizeSubnetInput(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  const value = raw.trim();
+  if (!value) return null;
+
+  if (isValidIpv4(value)) return `${value}/24`;
+
+  const parts = value.split('/');
+  if (parts.length !== 2) return null;
+  if (!isValidIpv4(parts[0])) return null;
+
+  const bits = Number(parts[1]);
+  if (!Number.isInteger(bits) || bits < 1 || bits > 30) return null;
+  return `${parts[0]}/${bits}`;
+}
+
+function expandCidrHosts(cidr, maxHosts) {
+  const normalized = normalizeSubnetInput(cidr);
+  if (!normalized) return [];
+
+  const [ip, prefixRaw] = normalized.split('/');
+  const prefix = Number(prefixRaw);
+  const baseInt = ipToInt(ip);
+  const hostBits = 32 - prefix;
+  const totalHosts = Math.max(0, Math.pow(2, hostBits) - 2);
+  const capped = Math.min(totalHosts, maxHosts);
+  if (capped <= 0) return [];
+
+  const mask = prefix === 0 ? 0 : ((0xffffffff << hostBits) >>> 0);
+  const network = baseInt & mask;
+
+  const hosts = [];
+  for (let i = 1; i <= capped; i += 1) {
+    hosts.push(intToIp((network + i) >>> 0));
+  }
+  return hosts;
+}
+
+function inferLocalSubnets() {
+  const interfaces = os.networkInterfaces();
+  const subnets = [];
+
+  Object.values(interfaces).forEach(ifaceList => {
+    (ifaceList || []).forEach(addr => {
+      if (!addr || addr.internal || addr.family !== 'IPv4') return;
+      if (!addr.address || !addr.netmask) return;
+
+      const ip = ipToInt(addr.address);
+      const mask = ipToInt(addr.netmask);
+      const network = ip & mask;
+
+      const prefix = addr.netmask
+        .split('.')
+        .map(n => Number(n).toString(2).padStart(8, '0'))
+        .join('')
+        .split('')
+        .filter(bit => bit === '1').length;
+
+      if (prefix >= 31 || prefix <= 0) return;
+      subnets.push(`${intToIp(network)}/${prefix}`);
+    });
+  });
+
+  return Array.from(new Set(subnets));
+}
+
+function gatherDiscoveryTargets(userSubnets = []) {
+  const candidates = [
+    ...(Array.isArray(userSubnets) ? userSubnets : []),
+    ...config.DISCOVERY_SUBNETS,
+    ...inferLocalSubnets(),
+  ];
+
+  const normalized = Array.from(new Set(candidates.map(normalizeSubnetInput).filter(Boolean)));
+  const targets = new Set();
+  let remaining = config.DISCOVERY_MAX_HOSTS;
+
+  normalized.forEach(cidr => {
+    if (remaining <= 0) return;
+    const hosts = expandCidrHosts(cidr, remaining);
+    hosts.forEach(ip => targets.add(ip));
+    remaining = Math.max(0, config.DISCOVERY_MAX_HOSTS - targets.size);
+  });
+
+  return Array.from(targets);
 }
 
 function parseOnvifScopes(rawScopes = '') {
@@ -245,7 +351,7 @@ const WS_DISCOVERY_PROBE = `<?xml version="1.0" encoding="UTF-8"?>
  * Performs ONVIF WS-Discovery probe on the local network.
  * Returns an array of discovered device info objects.
  */
-function discoverOnvif(timeout = config.ONVIF_DISCOVERY_TIMEOUT) {
+function discoverOnvif(timeout = config.ONVIF_DISCOVERY_TIMEOUT, unicastTargets = []) {
   return new Promise((resolve) => {
     const devices = new Map();
     const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
@@ -260,6 +366,11 @@ function discoverOnvif(timeout = config.ONVIF_DISCOVERY_TIMEOUT) {
 
       const msg = Buffer.from(WS_DISCOVERY_PROBE);
       socket.send(msg, 0, msg.length, ONVIF_PORT, ONVIF_MULTICAST_ADDR);
+
+      // Fallback: unicast probe common camera hosts when multicast is blocked.
+      unicastTargets.forEach(ip => {
+        socket.send(msg, 0, msg.length, ONVIF_PORT, ip);
+      });
     });
 
     socket.on('message', (msg) => {
@@ -321,6 +432,46 @@ function discoverOnvif(timeout = config.ONVIF_DISCOVERY_TIMEOUT) {
   });
 }
 
+async function probeRtspFallback(targetIps = []) {
+  const found = [];
+  const concurrency = 40;
+  const queue = [...targetIps];
+
+  const worker = async () => {
+    while (queue.length > 0) {
+      const ip = queue.shift();
+      if (!ip) break;
+
+      const reachable = await probeRtspPort(ip, 554, config.NETWORK_SCAN_TIMEOUT);
+      if (!reachable) continue;
+
+      found.push({
+        ip,
+        onvif_url: null,
+        manufacturer: 'Unknown',
+        model: 'IP Camera (RTSP detected)',
+        protocol: 'RTSP',
+        suggested_rtsp: `rtsp://${ip}:554/stream1`,
+        port: 554,
+        onvif_port: null,
+        camera_style: 'Standard IP',
+        device_type: 'IP Camera',
+        scope_name: null,
+        scope_hardware: null,
+        scope_location: null,
+        onvif_types: [],
+        is_avigilon: false,
+        is_avigilon_like: false,
+        profile_label: 'RTSP only',
+        match_confidence: 'low',
+      });
+    }
+  };
+
+  await Promise.all(Array.from({ length: concurrency }, worker));
+  return found;
+}
+
 /**
  * Probe common RTSP ports on an IP to check if a camera is present.
  */
@@ -349,11 +500,21 @@ function probeRtspPort(ip, port = 554, timeout = 2000) {
 /**
  * Main discovery function — runs ONVIF discovery.
  */
-async function discoverCameras() {
-  console.log('[Discovery] Starting ONVIF discovery...');
-  const onvifDevices = await discoverOnvif();
+async function discoverCameras(options = {}) {
+  const targets = gatherDiscoveryTargets(options.subnets);
+  console.log(`[Discovery] Starting ONVIF discovery (targets: ${targets.length})...`);
+
+  const onvifDevices = await discoverOnvif(config.ONVIF_DISCOVERY_TIMEOUT, targets);
   console.log(`[Discovery] Found ${onvifDevices.length} ONVIF device(s)`);
-  return onvifDevices;
+
+  if (onvifDevices.length > 0 || targets.length === 0) {
+    return onvifDevices;
+  }
+
+  console.log('[Discovery] Multicast/ONVIF response empty, running RTSP fallback scan...');
+  const rtspDevices = await probeRtspFallback(targets);
+  console.log(`[Discovery] RTSP fallback found ${rtspDevices.length} host(s)`);
+  return rtspDevices;
 }
 
 module.exports = { discoverCameras, probeRtspPort };

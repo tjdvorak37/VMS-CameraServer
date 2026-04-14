@@ -32,6 +32,10 @@ module.exports = {
   DISCOVERY_TIMEOUT: parseInt(process.env.DISCOVERY_TIMEOUT) || 5000,
   ONVIF_DISCOVERY_TIMEOUT: parseInt(process.env.ONVIF_DISCOVERY_TIMEOUT) || 5000,
   NETWORK_SCAN_TIMEOUT: parseInt(process.env.NETWORK_SCAN_TIMEOUT) || 3000,
+  DISCOVERY_SUBNETS: process.env.DISCOVERY_SUBNETS
+    ? process.env.DISCOVERY_SUBNETS.split(',').map(s => s.trim()).filter(Boolean)
+    : [],
+  DISCOVERY_MAX_HOSTS: parseInt(process.env.DISCOVERY_MAX_HOSTS) || 512,
 
   // CORS
   CORS_ORIGINS: process.env.CORS_ORIGINS

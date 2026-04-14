@@ -190,7 +190,9 @@ router.delete('/:id', authenticate, requireRole('admin'), (req, res) => {
 // POST /api/cameras/discover  — ONVIF network discovery
 router.post('/discover', authenticate, requireRole('admin', 'operator'), async (req, res) => {
   try {
-    const devices = await discoveryService.discoverCameras();
+    const devices = await discoveryService.discoverCameras({
+      subnets: Array.isArray(req.body?.subnets) ? req.body.subnets : undefined,
+    });
     return res.json({ devices });
   } catch (err) {
     console.error('[Cameras] Discovery error:', err);

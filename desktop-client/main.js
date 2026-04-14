@@ -1,4 +1,4 @@
-const path = require('path');
+bcdedit /set hypervisorlaunchtype autoconst path = require('path');
 const fs = require('fs');
 const { app, BrowserWindow, ipcMain, Menu, shell, nativeImage } = require('electron');
 
