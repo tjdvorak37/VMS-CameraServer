@@ -194,7 +194,27 @@ Screenshot placeholder:
 
 ---
 
-## 10. Recommended post-install checks
+## 10. Confirm auto-start after Windows updates/reboot
+
+To ensure the host and backend recover automatically after patch reboots:
+
+1. Open **Command Prompt** as Administrator.
+2. Check service status:
+   - `sc query VMSCameraServer`
+3. If installer output showed service error 1053, check startup task fallback:
+   - `schtasks /Query /TN "VMSCameraServer-Startup" /V /FO LIST`
+4. If no startup task exists, create one:
+   - `schtasks /Create /TN "VMSCameraServer-Startup" /SC ONSTART /RU SYSTEM /RL HIGHEST /TR "cmd.exe /c \"C:\VMS-CameraServer\run-vms-server.cmd\"" /F`
+5. Optional immediate test without reboot:
+   - `schtasks /Run /TN "VMSCameraServer-Startup"`
+
+Notes:
+- Windows can auto-start services/tasks after OS restarts, but cannot power on a physically powered-off machine by itself.
+- For power-loss recovery, enable your BIOS/UEFI option such as **Restore on AC Power Loss**.
+
+---
+
+## 11. Recommended post-install checks
 
 After installation, verify the basics:
 
@@ -207,7 +227,7 @@ After installation, verify the basics:
 
 ---
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 ### Installer says Node.js is missing
 - Install Node.js 22 LTS.
@@ -239,7 +259,7 @@ After installation, verify the basics:
 
 ---
 
-## 12. When to use the advanced Windows guide instead
+## 13. When to use the advanced Windows guide instead
 
 Use `README-WINDOWS-INSTALLER.md` instead of this guide if you need:
 - A different install directory

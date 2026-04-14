@@ -57,7 +57,11 @@ export const cameraApi = {
 export const recordingApi = {
   list: (params) => api.get('/recordings', { params }),
   get: (id) => api.get(`/recordings/${id}`),
-  playUrl: (id) => `${API_BASE}/recordings/${id}/play`,
+  playUrl: (id) => {
+    const token = localStorage.getItem('vms_token')
+    const qs = token ? `?token=${encodeURIComponent(token)}` : ''
+    return `${API_BASE}/recordings/${id}/play${qs}`
+  },
   delete: (id) => api.delete(`/recordings/${id}`),
   timeline: (cameraId, params) => api.get(`/recordings/timeline/${cameraId}`, { params }),
 }

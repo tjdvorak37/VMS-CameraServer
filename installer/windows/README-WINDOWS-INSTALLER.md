@@ -12,6 +12,7 @@
 - Uses existing frontend dist (or builds if missing)
 - Opens firewall port `3001`
 - Creates and starts a Windows service (`VMSCameraServer`)
+- If Windows service start returns 1053, registers a startup task fallback (`<ServiceName>-Startup`) to auto-start backend at boot
 - Completes first-run setup automatically (admin + system limits)
 - Applies Public Base URL and CORS values
 - Builds a `client-onboarding` folder for user-device installs
@@ -86,6 +87,28 @@ Notes for secure onboarding:
 2. Review **Settings > Server Setup** and adjust runtime values if needed.
 3. Open `<InstallDir>\client-onboarding`.
 4. Copy that folder to each user device and run `INSTALL-VMS-CLIENT.cmd` there.
+
+## Auto-start after reboot
+
+The preferred path is Windows service auto-start. Validate with:
+
+```cmd
+sc query VMSCameraServer
+```
+
+If the installer reports service start error 1053, it registers a scheduled task fallback named `<ServiceName>-Startup` that runs at startup under `SYSTEM`.
+
+Validate task fallback with:
+
+```cmd
+schtasks /Query /TN "VMSCameraServer-Startup" /V /FO LIST
+```
+
+Manual fallback setup on existing installs:
+
+```cmd
+schtasks /Create /TN "VMSCameraServer-Startup" /SC ONSTART /RU SYSTEM /RL HIGHEST /TR "cmd.exe /c \"C:\VMS-CameraServer\run-vms-server.cmd\"" /F
+```
 
 Notes:
 - If you place nginx/IIS in front of the backend, use that public URL instead of `:3001`.

@@ -7,11 +7,16 @@ const { getDb } = require('../config/database');
  */
 function authenticate(req, res, next) {
   const authHeader = req.headers['authorization'];
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  const bearerToken = authHeader && authHeader.startsWith('Bearer ')
+    ? authHeader.split(' ')[1]
+    : null;
+  const queryToken = typeof req.query?.token === 'string' ? req.query.token : null;
+  const token = bearerToken || queryToken;
+
+  if (!token) {
     return res.status(401).json({ error: 'No token provided' });
   }
 
-  const token = authHeader.split(' ')[1];
   try {
     const decoded = jwt.verify(token, config.JWT_SECRET);
     const db = getDb();

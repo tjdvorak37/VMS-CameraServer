@@ -39,6 +39,12 @@ If you need custom paths or installer arguments, use `README-WINDOWS-INSTALLER.m
 
 11. If you later change runtime settings in **Server Setup**, restart the `VMSCameraServer` service from the Windows **Services** app.
 
+12. Validate auto-start for reboot scenarios:
+- Run `sc query VMSCameraServer` in Administrator Command Prompt.
+- If service startup had error 1053 during install, validate or create startup task fallback:
+	- `schtasks /Query /TN "VMSCameraServer-Startup" /V /FO LIST`
+	- `schtasks /Create /TN "VMSCameraServer-Startup" /SC ONSTART /RU SYSTEM /RL HIGHEST /TR "cmd.exe /c \"C:\VMS-CameraServer\run-vms-server.cmd\"" /F`
+
 ---
 
 ## Default installer behavior
