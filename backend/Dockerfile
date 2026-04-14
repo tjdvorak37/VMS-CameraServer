@@ -1,18 +1,18 @@
-FROM node:20-alpine
+FROM node:20-bookworm-slim
 
-# Install FFmpeg
-RUN apk add --no-cache ffmpeg curl
+# Install runtime dependencies used by the backend and healthcheck.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ffmpeg curl ca-certificates python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
-
-# Install production dependencies
-RUN npm ci --omit=dev
-
 # Copy source
 COPY . .
+
+# Install production dependencies in-image so native modules match this runtime.
+RUN rm -rf node_modules \
+  && npm_config_build_from_source=true npm ci --omit=dev
 
 # Create data directories
 RUN mkdir -p data/recordings data/streams data/snapshots data/thumbnails
