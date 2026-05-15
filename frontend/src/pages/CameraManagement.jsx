@@ -182,18 +182,30 @@ function DiscoverModal({ onAdd, onAddBatch, onClose }) {
   const [profileFilter, setProfileFilter] = useState('avigilon-like')
   const [styleFilter, setStyleFilter] = useState('all')
   const [query, setQuery] = useState('')
+  const [discoverySubnets, setDiscoverySubnets] = useState('')
   const [selectedIps, setSelectedIps] = useState(new Set())
   const [addingBatch, setAddingBatch] = useState(false)
   const [sharedUsername, setSharedUsername] = useState('')
   const [sharedPassword, setSharedPassword] = useState('')
 
+  const parseSubnets = useCallback((value) => {
+    return value
+      .split(/[\n,]/)
+      .map(subnet => subnet.trim())
+      .filter(Boolean)
+  }, [])
+
   const runDiscovery = useCallback(() => {
     setScanning(true)
-    cameraApi.discover()
+    const subnets = parseSubnets(discoverySubnets)
+    cameraApi.discover(subnets.length > 0 ? { subnets } : undefined)
       .then(res => setDevices(res.data.devices || []))
-      .catch(() => toast.error('Discovery failed'))
+      .catch((err) => {
+        const details = err.response?.data?.details
+        toast.error(details ? `Discovery failed: ${details}` : 'Discovery failed')
+      })
       .finally(() => setScanning(false))
-  }, [])
+  }, [discoverySubnets, parseSubnets])
 
   useEffect(() => {
     runDiscovery()
@@ -308,6 +320,19 @@ function DiscoverModal({ onAdd, onAddBatch, onClose }) {
                 onChange={e => setQuery(e.target.value)}
               />
             </div>
+          </div>
+
+          <div>
+            <label className="label text-xs">Discovery Subnets (optional)</label>
+            <textarea
+              className="input min-h-[72px] font-mono text-sm"
+              placeholder="192.168.1.0/24, 10.0.0.0/24"
+              value={discoverySubnets}
+              onChange={e => setDiscoverySubnets(e.target.value)}
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              Useful for Docker or remote deployments when the server cannot infer the camera LAN automatically.
+            </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

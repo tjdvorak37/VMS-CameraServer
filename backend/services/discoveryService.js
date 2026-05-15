@@ -7,6 +7,8 @@ const dgram = require('dgram');
 const net = require('net');
 const os = require('os');
 const config = require('../config/config');
+const { getDb } = require('../config/database');
+const { getSystemSetting } = require('../utils/systemSettings');
 
 // ONVIF WS-Discovery multicast
 const ONVIF_MULTICAST_ADDR = '239.255.255.250';
@@ -155,8 +157,22 @@ function inferLocalSubnets() {
 }
 
 function gatherDiscoveryTargets(userSubnets = []) {
+  let storedSubnets = [];
+
+  try {
+    const db = getDb();
+    const raw = getSystemSetting(db, 'discovery_subnets', '');
+    storedSubnets = String(raw || '')
+      .split(/[\n,]/)
+      .map(subnet => subnet.trim())
+      .filter(Boolean);
+  } catch (_) {
+    storedSubnets = [];
+  }
+
   const candidates = [
     ...(Array.isArray(userSubnets) ? userSubnets : []),
+    ...storedSubnets,
     ...config.DISCOVERY_SUBNETS,
     ...inferLocalSubnets(),
   ];

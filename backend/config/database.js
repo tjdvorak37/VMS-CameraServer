@@ -193,6 +193,7 @@ function seedDefaultAdmin(db) {
     ['smtp_host', ''],
     ['smtp_port', '587'],
     ['public_base_url', ''],
+    ['discovery_subnets', ''],
     ['setup_completed', 'true'],
     ['setup_completed_at', ''],
   ];

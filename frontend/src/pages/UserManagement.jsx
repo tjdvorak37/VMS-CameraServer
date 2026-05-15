@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   Plus, Loader2, Edit3, Trash2, UserCheck, UserX,
-  Shield, Eye, Settings as SettingsIcon
+  Shield, Eye, Settings as SettingsIcon, KeyRound
 } from 'lucide-react'
 import { userApi } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
@@ -18,6 +18,87 @@ const ROLE_ICONS = {
   admin:    Shield,
   operator: SettingsIcon,
   viewer:   Eye,
+}
+
+function ResetPasswordModal({ user, onClose }) {
+  const [form, setForm] = useState({ newPassword: '', confirmPassword: '' })
+  const [saving, setSaving] = useState(false)
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    if (form.newPassword !== form.confirmPassword) {
+      toast.error('Passwords do not match')
+      return
+    }
+    if (form.newPassword.length < 8) {
+      toast.error('Password must be at least 8 characters')
+      return
+    }
+    setSaving(true)
+    try {
+      await userApi.update(user.id, { password: form.newPassword, must_change_password: true })
+      toast.success(`Password reset for ${user.username}`)
+      onClose()
+    } catch (err) {
+      const msg = err.response?.data?.error
+        || err.response?.data?.errors?.[0]?.msg
+        || 'Reset failed'
+      toast.error(msg)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 animate-fade-in">
+      <div className="bg-surface-700 border border-surface-500 rounded-2xl w-full max-w-sm shadow-2xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-500">
+          <div className="flex items-center gap-2">
+            <KeyRound size={16} className="text-accent" />
+            <h2 className="text-lg font-semibold text-slate-100">Reset Password</h2>
+          </div>
+          <button onClick={onClose} className="btn-ghost p-1.5">✕</button>
+        </div>
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+          <p className="text-sm text-slate-400">
+            Set a new password for <span className="font-medium text-slate-200">{user.username}</span>.
+            The user will be required to change it on next login.
+          </p>
+          <div>
+            <label className="label">New Password *</label>
+            <input
+              type="password"
+              className="input"
+              value={form.newPassword}
+              onChange={e => setForm(f => ({ ...f, newPassword: e.target.value }))}
+              minLength={8}
+              required
+              autoComplete="new-password"
+            />
+          </div>
+          <div>
+            <label className="label">Confirm Password *</label>
+            <input
+              type="password"
+              className="input"
+              value={form.confirmPassword}
+              onChange={e => setForm(f => ({ ...f, confirmPassword: e.target.value }))}
+              minLength={8}
+              required
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="flex gap-3 pt-2 border-t border-surface-500">
+            <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
+            <button type="submit" disabled={saving} className="btn-primary flex-1">
+              {saving && <Loader2 size={14} className="animate-spin inline mr-2" />}
+              Reset Password
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
 }
 
 function UserModal({ user, onClose, onSave }) {
@@ -166,6 +247,7 @@ export default function UserManagement() {
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState(null)
   const [editUser, setEditUser] = useState(null)
+  const [resetUser, setResetUser] = useState(null)
 
   const fetchUsers = useCallback(() => {
     userApi.list()
@@ -278,6 +360,13 @@ export default function UserManagement() {
                           </button>
                         )}
                         <button
+                          onClick={() => setResetUser(u)}
+                          className="btn-ghost p-1.5 text-accent"
+                          title="Reset Password"
+                        >
+                          <KeyRound size={15} />
+                        </button>
+                        <button
                           onClick={() => { setEditUser(u); setModal('edit') }}
                           className="btn-ghost p-1.5"
                           title="Edit"
@@ -308,6 +397,13 @@ export default function UserManagement() {
           user={editUser}
           onClose={() => setModal(null)}
           onSave={fetchUsers}
+        />
+      )}
+
+      {resetUser && (
+        <ResetPasswordModal
+          user={resetUser}
+          onClose={() => setResetUser(null)}
         />
       )}
     </div>

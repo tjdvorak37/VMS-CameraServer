@@ -35,6 +35,7 @@ export default function Settings() {
     email_alerts: 'false',
     smtp_host: '',
     smtp_port: '587',
+    discovery_subnets: '',
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -365,6 +366,23 @@ export default function Settings() {
                   </div>
                 </div>
               )}
+            </div>
+          </SettingSection>
+        </div>
+
+        <div className="mt-4">
+          <SettingSection title="Camera Discovery" icon={Globe}>
+            <div>
+              <label className="label text-xs">Default Discovery Subnets</label>
+              <textarea
+                className="input min-h-[92px] font-mono text-sm"
+                placeholder="192.168.1.0/24,10.0.0.0/24"
+                value={settings.discovery_subnets || ''}
+                onChange={e => setSettings(s => ({ ...s, discovery_subnets: e.target.value }))}
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Used by the discovery scanner when no subnet list is entered in the camera search dialog.
+              </p>
             </div>
           </SettingSection>
         </div>
