@@ -250,6 +250,9 @@ function inferDeviceType(scopeTypes = [], rawTypes = '') {
 
 function buildSuggestedRtsp(ip, manufacturer) {
   const m = (manufacturer || '').toLowerCase();
+  if (m.includes('arecont')) {
+    return `rtsp://${ip}:554/h264.sdp`;
+  }
   if (m.includes('avigilon')) {
     return `rtsp://${ip}:554/defaultPrimary?streamType=u`;
   }

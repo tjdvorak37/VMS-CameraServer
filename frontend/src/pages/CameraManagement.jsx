@@ -14,11 +14,40 @@ function StatusBadge({ status }) {
   return <span className="badge-offline"><Circle size={6} className="mr-1 fill-current" />Offline</span>
 }
 
+function defaultRtspPath(manufacturer = '') {
+  const m = manufacturer.toLowerCase()
+  if (m.includes('arecont')) return '/h264.sdp'
+  if (m.includes('avigilon')) return '/defaultPrimary?streamType=u'
+  if (m.includes('axis')) return '/axis-media/media.amp'
+  if (m.includes('hikvision')) return '/Streaming/Channels/101'
+  if (m.includes('dahua') || m.includes('amcrest')) return '/cam/realmonitor?channel=1&subtype=0'
+  if (m.includes('hanwha') || m.includes('wisenet')) return '/profile2/media.smp'
+  return '/stream1'
+}
+
+function buildDefaultRtspUrl({ ip_address, port, username, password, manufacturer }) {
+  const ip = ip_address || ''
+  const rtspPort = port || 554
+  const user = username || ''
+  const pass = password || ''
+  const creds = user
+    ? `${encodeURIComponent(user)}${pass ? `:${encodeURIComponent(pass)}` : ''}@`
+    : ''
+  const path = defaultRtspPath(manufacturer)
+  return `rtsp://${creds}${ip}:${rtspPort}${path}`
+}
+
 function AddEditModal({ camera, onClose, onSave }) {
   const [form, setForm] = useState({
     name: camera?.name || '',
     ip_address: camera?.ip_address || '',
-    rtsp_url: camera?.rtsp_url || `rtsp://${camera?.ip_address || ''}:554/stream1`,
+    rtsp_url: camera?.rtsp_url || buildDefaultRtspUrl({
+      ip_address: camera?.ip_address || '',
+      port: camera?.port || 554,
+      username: camera?.username || '',
+      password: camera?.password || '',
+      manufacturer: camera?.manufacturer || '',
+    }),
     port: camera?.port || 554,
     onvif_port: camera?.onvif_port || 80,
     username: camera?.username || '',
@@ -37,14 +66,7 @@ function AddEditModal({ camera, onClose, onSave }) {
   const updateRtsp = (field, value) => {
     const next = { ...form, [field]: value }
     if (!camera && !rtspEdited.current) {
-      const ip   = field === 'ip_address' ? value : next.ip_address
-      const port = field === 'port'       ? (value || 554) : (next.port || 554)
-      const user = field === 'username'   ? value : next.username
-      const pass = field === 'password'   ? value : next.password
-      const creds = user
-        ? `${encodeURIComponent(user)}${pass ? `:${encodeURIComponent(pass)}` : ''}@`
-        : ''
-      next.rtsp_url = `rtsp://${creds}${ip}:${port}/stream1`
+      next.rtsp_url = buildDefaultRtspUrl(next)
     }
     setForm(next)
   }
@@ -91,7 +113,7 @@ function AddEditModal({ camera, onClose, onSave }) {
             </div>
             <div>
               <label className="label">RTSP Port</label>
-              <input type="number" className="input" value={form.port} onChange={e => setForm(f => ({ ...f, port: parseInt(e.target.value, 10) || 0 }))} />
+              <input type="number" className="input" value={form.port} onChange={e => updateRtsp('port', parseInt(e.target.value, 10) || 0)} />
             </div>
             <div className="col-span-2">
               <label className="label">ONVIF Port</label>
@@ -100,7 +122,7 @@ function AddEditModal({ camera, onClose, onSave }) {
             <div className="col-span-2">
               <label className="label">RTSP URL *</label>
               <input className="input font-mono text-sm" value={form.rtsp_url} onChange={e => { rtspEdited.current = true; setForm(f => ({ ...f, rtsp_url: e.target.value })) }} required />
-              <p className="text-xs text-slate-500 mt-1">e.g. rtsp://user:pass@192.168.1.100:554/stream1</p>
+              <p className="text-xs text-slate-500 mt-1">e.g. rtsp://user:pass@192.168.1.100:554/h264.sdp (Arecont) or /stream1</p>
             </div>
             <div className="col-span-2">
               <label className="label">Snapshot URL (optional)</label>
@@ -121,7 +143,7 @@ function AddEditModal({ camera, onClose, onSave }) {
             </div>
             <div>
               <label className="label">Manufacturer</label>
-              <input className="input" value={form.manufacturer} onChange={e => setForm(f => ({ ...f, manufacturer: e.target.value }))} placeholder="e.g. Hikvision" />
+              <input className="input" value={form.manufacturer} onChange={e => updateRtsp('manufacturer', e.target.value)} placeholder="e.g. Hikvision, Arecont Vision" />
             </div>
             <div>
               <label className="label">Model</label>
@@ -264,7 +286,11 @@ function DiscoverModal({ onAdd, onAddBatch, onClose }) {
   }, [devices, profileFilter, styleFilter, query])
 
   const buildRtspWithCreds = useCallback((device) => {
-    const baseUrl = device.suggested_rtsp || `rtsp://${device.ip}:554/stream1`
+    const baseUrl = device.suggested_rtsp || buildDefaultRtspUrl({
+      ip_address: device.ip,
+      port: device.port || 554,
+      manufacturer: device.manufacturer,
+    })
     if (!sharedUsername) return baseUrl
     try {
       const url = new URL(baseUrl)
@@ -564,7 +590,11 @@ export default function CameraManagement() {
           ip_address: device.ip,
           rtsp_url: typeof rtspForDevice === 'function'
             ? rtspForDevice(device)
-            : (device.suggested_rtsp || `rtsp://${device.ip}:554/stream1`),
+            : (device.suggested_rtsp || buildDefaultRtspUrl({
+              ip_address: device.ip,
+              port: device.port || 554,
+              manufacturer: device.manufacturer,
+            })),
           port: device.port || 554,
           username: username || undefined,
           password: password || undefined,
@@ -746,7 +776,11 @@ export default function CameraManagement() {
             setEditCamera({
               name: `${device.manufacturer} ${device.model}`,
               ip_address: device.ip,
-              rtsp_url: creds.rtsp_url || device.suggested_rtsp,
+              rtsp_url: creds.rtsp_url || device.suggested_rtsp || buildDefaultRtspUrl({
+                ip_address: device.ip,
+                port: device.port || 554,
+                manufacturer: device.manufacturer,
+              }),
               port: device.port,
               username: creds.username || '',
               password: creds.password || '',
