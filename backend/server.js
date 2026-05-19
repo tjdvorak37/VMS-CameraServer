@@ -43,6 +43,9 @@ const { authenticate } = require('./middleware/auth');
 // ─── Express app setup ──────────────────────────────────────────────────────
 const app = express();
 
+// Trust proxy (nginx is reverse proxy, sets X-Forwarded-* headers)
+app.set('trust proxy', 1);
+
 // Security headers (relax CSP for HLS video)
 app.use(
   helmet({
