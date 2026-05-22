@@ -2,7 +2,7 @@ param(
   [ValidateSet('Quick', 'Guided')]
   [string]$Mode = 'Quick',
   [switch]$ConfigureNow,
-  [string]$InstallDir = 'C:\VMS-CameraServer',
+  [string]$InstallDir = 'V:\VMS-CameraServer',
   [string]$DataDrive = 'V:',
   [string]$ServiceName = 'VMSCameraServer',
   [string]$PublicBaseUrl = '',

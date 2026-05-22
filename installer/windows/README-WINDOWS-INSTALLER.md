@@ -4,8 +4,8 @@
 
 `install-vms-server.cmd` installs VMS Camera Server on Windows 11/Windows Server:
 
-- Copies app files to `C:\VMS-CameraServer`
-- Keeps the backend and launcher on `C:\VMS-CameraServer`
+- Copies app files to `V:\VMS-CameraServer`
+- Keeps the backend and launcher on `V:\VMS-CameraServer`
 - Uses your data drive for database and recordings (default `V:`)
 - Generates `.env` with production values
 - Installs backend dependencies
@@ -32,7 +32,7 @@ Double-click:
 
 This runs one-click mode (`-Mode Quick -ConfigureNow`).
 
-One-click mode uses `C:\VMS-CameraServer` for the app and `V:\VMSData` for the database, recordings, streams, snapshots, and thumbnails.
+One-click mode uses `V:\VMS-CameraServer` for the app and `V:\VMSData` for the database, recordings, streams, snapshots, and thumbnails.
 
 For guided prompts (walkthrough mode), use:
 
@@ -53,7 +53,7 @@ For a shorter checklist version, see `README-WINDOWS-11-QUICK-INSTALL.md`.
 Run from an elevated command prompt:
 
 ```cmd
-installer\windows\install-vms-server.cmd -InstallDir "C:\VMS-CameraServer" -DataDrive "V:" -ServiceName "VMSCameraServer" -PublicBaseUrl "http://vms-hq:3001" -CorsOrigins "http://vms-hq:3001"
+installer\windows\install-vms-server.cmd -InstallDir "V:\VMS-CameraServer" -DataDrive "V:" -ServiceName "VMSCameraServer" -PublicBaseUrl "http://vms-hq:3001" -CorsOrigins "http://vms-hq:3001"
 ```
 
 Skip service creation:
@@ -107,7 +107,7 @@ schtasks /Query /TN "VMSCameraServer-Startup" /V /FO LIST
 Manual fallback setup on existing installs:
 
 ```cmd
-schtasks /Create /TN "VMSCameraServer-Startup" /SC ONSTART /RU SYSTEM /RL HIGHEST /TR "cmd.exe /c \"C:\VMS-CameraServer\run-vms-server.cmd\"" /F
+schtasks /Create /TN "VMSCameraServer-Startup" /SC ONSTART /RU SYSTEM /RL HIGHEST /TR "cmd.exe /c \"V:\VMS-CameraServer\run-vms-server.cmd\"" /F
 ```
 
 Notes:
@@ -117,3 +117,35 @@ Notes:
 - The packaged ZIP includes `INSTALL-WINDOWS-SERVER-WALKTHROUGH.cmd` for guided prompting.
 - The packaged ZIP includes `INSTALL-WINDOWS-CLIENT.cmd` for direct desktop-client install on non-server devices.
 - The packaged ZIP includes `VMS-SETUP-LAUNCHER.cmd` for one-window launch options.
+
+## Migration from C: to V:
+
+Use the migration script when you already have an older Windows install on `C:` and want to safely cut over to `V:`.
+
+Default run (elevated command prompt):
+
+```cmd
+installer\windows\migrate-vms-to-v-drive.cmd
+```
+
+Direct PowerShell run with explicit paths:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File installer\windows\migrate-vms-to-v-drive.ps1 `
+	-SourceInstallDir "C:\VMS-CameraServer" `
+	-TargetInstallDir "V:\VMS-CameraServer" `
+	-SourceDataDir "C:\VMSData" `
+	-TargetDataDir "V:\VMSData" `
+	-ServiceName "VMSCameraServer"
+```
+
+What it does:
+- Stops VMS service/tasks and stray Node backend processes.
+- Copies app files to `V:\VMS-CameraServer` (excluding node_modules/build artifacts).
+- Copies data from `C:\VMSData` and legacy `backend\data` into `V:\VMSData`.
+- Normalizes `.env` and `backend\.env` storage paths to `V:/VMSData/...`.
+- Rebinds and starts the Windows service against `V:\VMS-CameraServer\run-vms-server.cmd`.
+- Verifies `http://localhost:3001/api/health`.
+
+Safe-ops note:
+- The migration script does not delete old `C:` data. Keep it until you verify stable operation on `V:`.

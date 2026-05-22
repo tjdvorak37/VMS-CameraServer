@@ -1,0 +1,16 @@
+{
+  "name": "VMS Camera Server",
+  "image": "mcr.microsoft.com/devcontainers/universal:2",
+  "forwardPorts": [8080, 3001],
+  "portsAttributes": {
+    "8080": {
+      "label": "VMS Web UI",
+      "onAutoForward": "openBrowser"
+    },
+    "3001": {
+      "label": "VMS Backend API",
+      "onAutoForward": "notify"
+    }
+  },
+  "postStartCommand": "cd /workspaces/VMS-CameraServer && docker compose up -d 2>/dev/null || true"
+}

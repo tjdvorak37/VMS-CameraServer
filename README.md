@@ -254,7 +254,7 @@ On the target Windows server:
 The server installer configures storage paths, environment, firewall, dependencies, Windows service, initial admin setup, and server URL settings.
 
 After server install:
-1. Open `C:\VMS-CameraServer\client-onboarding`
+1. Open `V:\VMS-CameraServer\client-onboarding`
 2. Copy that folder to each user workstation
 3. Run `INSTALL-VMS-CLIENT.cmd` on each user device
 

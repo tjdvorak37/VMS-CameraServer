@@ -33,7 +33,7 @@ If you need custom paths or installer arguments, use `README-WINDOWS-INSTALLER.m
 
 8. Open **Settings > Server Setup** and confirm **Public Base URL**.
 
-9. Open `C:\VMS-CameraServer\client-onboarding` and copy that folder to each user device.
+9. Open `V:\VMS-CameraServer\client-onboarding` and copy that folder to each user device.
 
 10. On each user device, run `INSTALL-VMS-CLIENT.cmd`.
 
@@ -43,14 +43,14 @@ If you need custom paths or installer arguments, use `README-WINDOWS-INSTALLER.m
 - Run `sc query VMSCameraServer` in Administrator Command Prompt.
 - If service startup had error 1053 during install, validate or create startup task fallback:
 	- `schtasks /Query /TN "VMSCameraServer-Startup" /V /FO LIST`
-	- `schtasks /Create /TN "VMSCameraServer-Startup" /SC ONSTART /RU SYSTEM /RL HIGHEST /TR "cmd.exe /c \"C:\VMS-CameraServer\run-vms-server.cmd\"" /F`
+	- `schtasks /Create /TN "VMSCameraServer-Startup" /SC ONSTART /RU SYSTEM /RL HIGHEST /TR "cmd.exe /c \"V:\VMS-CameraServer\run-vms-server.cmd\"" /F`
 
 ---
 
 ## Default installer behavior
 
 The packaged installer normally:
-- installs to `C:\VMS-CameraServer`
+- installs to `V:\VMS-CameraServer`
 - stores data under `V:\VMSData`
 - opens Windows Firewall for TCP `3001`
 - creates the `VMSCameraServer` Windows service

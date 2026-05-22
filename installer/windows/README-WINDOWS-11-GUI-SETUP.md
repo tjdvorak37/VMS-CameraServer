@@ -70,7 +70,7 @@ Direct option:
 4. Wait for the installer window to complete.
 
 What the installer does:
-- Copies the app into `C:\VMS-CameraServer`
+- Copies the app into `V:\VMS-CameraServer`
 - Creates storage folders under `V:\VMSData`
 - Generates `.env` files with production values
 - Installs backend dependencies
@@ -78,7 +78,7 @@ What the installer does:
 - Opens Windows Firewall for TCP port `3001`
 - Creates and starts the `VMSCameraServer` Windows service
 - Completes initial setup automatically in one-click mode
-- Generates `C:\VMS-CameraServer\client-onboarding` for user-device installs
+- Generates `V:\VMS-CameraServer\client-onboarding` for user-device installs
 
 Screenshot placeholder:
 - Right-click menu on `INSTALL-WINDOWS-SERVER.cmd` with **Run as administrator** highlighted.
@@ -167,7 +167,7 @@ Screenshot placeholder:
 
 After server install:
 
-1. Open `C:\VMS-CameraServer\client-onboarding`
+1. Open `V:\VMS-CameraServer\client-onboarding`
 2. Copy that folder to each user PC
 3. Run `INSTALL-VMS-CLIENT.cmd` on each user PC
 
@@ -204,7 +204,7 @@ To ensure the host and backend recover automatically after patch reboots:
 3. If installer output showed service error 1053, check startup task fallback:
    - `schtasks /Query /TN "VMSCameraServer-Startup" /V /FO LIST`
 4. If no startup task exists, create one:
-   - `schtasks /Create /TN "VMSCameraServer-Startup" /SC ONSTART /RU SYSTEM /RL HIGHEST /TR "cmd.exe /c \"C:\VMS-CameraServer\run-vms-server.cmd\"" /F`
+   - `schtasks /Create /TN "VMSCameraServer-Startup" /SC ONSTART /RU SYSTEM /RL HIGHEST /TR "cmd.exe /c \"V:\VMS-CameraServer\run-vms-server.cmd\"" /F`
 5. Optional immediate test without reboot:
    - `schtasks /Run /TN "VMSCameraServer-Startup"`
 
