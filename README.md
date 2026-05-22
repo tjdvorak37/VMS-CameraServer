@@ -250,6 +250,7 @@ On the target Windows server:
 2. Optional: run `VMS-SETUP-LAUNCHER.cmd` for a GUI launcher (one-click, walkthrough, or client install)
 3. Run `INSTALL-WINDOWS-SERVER.cmd` as Administrator for one-click provisioning
 4. Optional: run `INSTALL-WINDOWS-SERVER-WALKTHROUGH.cmd` for prompted proprietary values
+5. For existing installs on `C:`, run `INSTALL-WINDOWS-SERVER-MIGRATE-C-TO-V.cmd` for safe cutover
 
 The server installer configures storage paths, environment, firewall, dependencies, Windows service, initial admin setup, and server URL settings.
 

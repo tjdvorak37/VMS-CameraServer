@@ -62,12 +62,22 @@ Fastest option:
 1. Double-click `VMS-SETUP-LAUNCHER.cmd`
 2. Click either **One-Click Server Install + Provision** or **Guided Server Walkthrough**
 
+Migration option for existing hosts:
+1. Double-click `VMS-SETUP-LAUNCHER.cmd`
+2. Click **Migrate Existing C: Install To V: (Safe Cutover)**
+3. Keep old `C:` data in place for rollback until `V:` operation is verified stable
+
 Direct option:
 
 1. Right-click `INSTALL-WINDOWS-SERVER.cmd`.
 2. Click **Run as administrator**.
 3. If Windows shows a User Account Control prompt, click **Yes**.
 4. Wait for the installer window to complete.
+
+Direct migration option:
+1. Right-click `INSTALL-WINDOWS-SERVER-MIGRATE-C-TO-V.cmd`.
+2. Click **Run as administrator**.
+3. Wait for the migration installer window to complete.
 
 What the installer does:
 - Copies the app into `V:\VMS-CameraServer`

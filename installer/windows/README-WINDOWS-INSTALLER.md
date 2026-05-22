@@ -17,6 +17,8 @@
 - Applies Public Base URL and CORS values
 - Builds a `client-onboarding` folder for user-device installs
 
+`install-vms-server-migrate.cmd` performs a safe C: to V: migration cutover for existing installs.
+
 ## Prerequisites on target server
 
 - Run installer as Administrator
@@ -37,6 +39,10 @@ One-click mode uses `V:\VMS-CameraServer` for the app and `V:\VMSData` for the d
 For guided prompts (walkthrough mode), use:
 
 `installer\windows\install-vms-server-walkthrough.cmd`
+
+For existing installs currently on `C:`, use:
+
+`installer\windows\install-vms-server-migrate.cmd`
 
 Or launch a branded GUI menu:
 
@@ -128,6 +134,12 @@ Default run (elevated command prompt):
 installer\windows\migrate-vms-to-v-drive.cmd
 ```
 
+Installer-style entry point (same migration flow):
+
+```cmd
+installer\windows\install-vms-server-migrate.cmd
+```
+
 Direct PowerShell run with explicit paths:
 
 ```powershell
@@ -149,3 +161,26 @@ What it does:
 
 Safe-ops note:
 - The migration script does not delete old `C:` data. Keep it until you verify stable operation on `V:`.
+
+## Quick discovery tuning script (PowerShell)
+
+If camera discovery is not finding devices, run this from an elevated terminal on the server:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File installer\windows\configure-vms-discovery.ps1 `
+	-InstallDir "V:\VMS-CameraServer" `
+	-Subnets "192.168.10.0/24","192.168.20.0/24" `
+	-DiscoveryMaxHosts 4096 `
+	-OnvifDiscoveryTimeoutMs 12000 `
+	-NetworkScanTimeoutMs 5000 `
+	-TestCameraIps "192.168.10.50" `
+	-ShowLogTail
+```
+
+CMD wrapper version:
+
+```cmd
+installer\windows\configure-vms-discovery.cmd -InstallDir "V:\VMS-CameraServer" -Subnets "192.168.10.0/24","192.168.20.0/24" -DiscoveryMaxHosts 4096 -OnvifDiscoveryTimeoutMs 12000 -NetworkScanTimeoutMs 5000 -TestCameraIps "192.168.10.50" -ShowLogTail
+```
+
+This script updates both `V:\VMS-CameraServer\.env` and `V:\VMS-CameraServer\backend\.env`, restarts startup task `VMSCameraServer-Startup`, checks health at `http://localhost:3001/api/health`, and can test camera reachability on ports `554`, `80`, and `3702`.

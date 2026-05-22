@@ -66,7 +66,7 @@ function Start-VmsInstaller {
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'VMS Setup Launcher'
-$form.Size = New-Object System.Drawing.Size(640, 440)
+$form.Size = New-Object System.Drawing.Size(640, 500)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedDialog'
 $form.MaximizeBox = $false
@@ -124,17 +124,29 @@ $btnClient.Add_Click({
 })
 $form.Controls.Add($btnClient)
 
+$btnMigrate = New-Object System.Windows.Forms.Button
+$btnMigrate.Text = 'Migrate Existing C: Install To V: (Safe Cutover)'
+$btnMigrate.Size = New-Object System.Drawing.Size(560, 52)
+$btnMigrate.Location = New-Object System.Drawing.Point(32, 302)
+$btnMigrate.BackColor = [System.Drawing.Color]::FromArgb(30, 41, 59)
+$btnMigrate.ForeColor = [System.Drawing.Color]::White
+$btnMigrate.FlatStyle = 'Flat'
+$btnMigrate.Add_Click({
+  Start-VmsInstaller -ScriptName 'install-vms-server-migrate.cmd' -RequireElevation
+})
+$form.Controls.Add($btnMigrate)
+
 $footer = New-Object System.Windows.Forms.Label
-$footer.Text = 'Tip: Use Guided mode when entering proprietary environment details.'
+$footer.Text = 'Tip: Use Migrate when replacing an older C: install with the V: layout.'
 $footer.Font = New-Object System.Drawing.Font('Segoe UI', 9)
 $footer.AutoSize = $true
-$footer.Location = New-Object System.Drawing.Point(32, 312)
+$footer.Location = New-Object System.Drawing.Point(32, 376)
 $form.Controls.Add($footer)
 
 $btnExit = New-Object System.Windows.Forms.Button
 $btnExit.Text = 'Close'
 $btnExit.Size = New-Object System.Drawing.Size(120, 36)
-$btnExit.Location = New-Object System.Drawing.Point(472, 344)
+$btnExit.Location = New-Object System.Drawing.Point(472, 408)
 $btnExit.BackColor = [System.Drawing.Color]::FromArgb(51, 65, 85)
 $btnExit.ForeColor = [System.Drawing.Color]::White
 $btnExit.FlatStyle = 'Flat'

@@ -26,6 +26,8 @@ If you need custom paths or installer arguments, use `README-WINDOWS-INSTALLER.m
 
 5. Run `VMS-SETUP-LAUNCHER.cmd` and choose **One-Click Server Install + Provision**.
 
+If this host already has an older install on `C:`, choose **Migrate Existing C: Install To V: (Safe Cutover)** instead.
+
 6. Wait for the installer to finish.
 
 7. Sign in at:
@@ -59,6 +61,9 @@ The packaged installer normally:
 - supports CSV user provisioning with forced first-login password reset
 
 If your storage drive is not `V:`, use the guided walkthrough or run the installer with `-DataDrive`.
+
+If you prefer running migration directly from command line, use:
+- `INSTALL-WINDOWS-SERVER-MIGRATE-C-TO-V.cmd`
 
 ---
 

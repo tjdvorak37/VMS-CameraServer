@@ -66,6 +66,20 @@ if errorlevel 1 (
 endlocal
 EOF
 
+cat > "$PKG_DIR/INSTALL-WINDOWS-SERVER-MIGRATE-C-TO-V.cmd" <<'EOF'
+@echo off
+setlocal
+set SCRIPT_DIR=%~dp0
+call "%SCRIPT_DIR%installer\windows\install-vms-server-migrate.cmd" %*
+if errorlevel 1 (
+  echo.
+  echo [VMS] INSTALL-WINDOWS-SERVER-MIGRATE-C-TO-V failed. Review messages above.
+  pause
+  exit /b 1
+)
+endlocal
+EOF
+
 cat > "$PKG_DIR/INSTALL-WINDOWS-CLIENT.cmd" <<'EOF'
 @echo off
 setlocal
@@ -96,6 +110,7 @@ EOF
 
 chmod +x "$PKG_DIR/INSTALL-WINDOWS-SERVER.cmd" || true
 chmod +x "$PKG_DIR/INSTALL-WINDOWS-SERVER-WALKTHROUGH.cmd" || true
+chmod +x "$PKG_DIR/INSTALL-WINDOWS-SERVER-MIGRATE-C-TO-V.cmd" || true
 chmod +x "$PKG_DIR/INSTALL-WINDOWS-CLIENT.cmd" || true
 chmod +x "$PKG_DIR/VMS-SETUP-LAUNCHER.cmd" || true
 
