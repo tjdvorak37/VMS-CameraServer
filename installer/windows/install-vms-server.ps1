@@ -527,6 +527,7 @@ if ($ConfigureNow) {
   }
 
   $status = Invoke-RestMethod -Method Get -Uri "$baseUrl/api/setup/status"
+  $canRunAuthenticatedProvisioning = $true
 
   if (-not $status.setupCompleted) {
     if ([string]::IsNullOrWhiteSpace($AdminPassword)) {
@@ -550,6 +551,16 @@ if ($ConfigureNow) {
     Write-Ok 'Initial setup completed automatically.'
   } else {
     Write-Warn 'Setup already completed. Skipping setup completion step.'
+
+    if ([string]::IsNullOrWhiteSpace($AdminPassword)) {
+      if ($Mode -eq 'Guided') {
+        $AdminPassword = Read-RequiredSecret 'Existing admin password (required to apply server config/import users)'
+      } else {
+        $canRunAuthenticatedProvisioning = $false
+        Write-Warn 'Admin password was not supplied, so authenticated provisioning steps will be skipped in one-click mode.'
+        Write-Warn 'To apply server-config or import users now, rerun with -Mode Guided or pass -AdminPassword.'
+      }
+    }
   }
 
   if ([string]::IsNullOrWhiteSpace($PublicBaseUrl)) {
@@ -560,34 +571,39 @@ if ($ConfigureNow) {
     $CorsOrigins = $PublicBaseUrl
   }
 
-  Write-Info 'Logging in as admin to apply server configuration and import users...'
-  $login = Invoke-JsonPost "$baseUrl/api/auth/login" @{
-    username = $AdminUsername
-    password = $AdminPassword
+  if ($canRunAuthenticatedProvisioning) {
+    Write-Info 'Logging in as admin to apply server configuration and import users...'
+    $login = Invoke-JsonPost "$baseUrl/api/auth/login" @{
+      username = $AdminUsername
+      password = $AdminPassword
+    }
+
+    $token = [string]$login.token
+    if ([string]::IsNullOrWhiteSpace($token)) {
+      throw 'Admin login token was not returned. Cannot continue provisioning.'
+    }
+
+    Invoke-JsonPut "$baseUrl/api/setup/server-config" @{
+      public_base_url = $PublicBaseUrl
+      cors_origins = $CorsOrigins
+    } @{ Authorization = "Bearer $token" } | Out-Null
+    Write-Ok 'Server public URL and CORS configuration updated.'
+
+    $importResult = Import-ProvisionUsers $UsersCsvPath $baseUrl $token $InstallDir
+    $createdUsersCount = [int]$importResult.created
+    $provisionedCredentialsPath = [string]$importResult.credentialsPath
+    if ($createdUsersCount -gt 0) {
+      Write-Ok "Created $createdUsersCount users from CSV."
+    }
+
+    $onboardingDir = New-ClientOnboardingPackage $InstallDir $PublicBaseUrl
+    Write-Ok "Client onboarding package created: $onboardingDir"
+
+    $provisioningRan = $true
+  } else {
+    Write-Warn 'Authenticated provisioning steps were skipped.'
+    Write-Warn 'Run INSTALL-WINDOWS-SERVER-WALKTHROUGH.cmd as Administrator to enter existing admin credentials and finish provisioning.'
   }
-
-  $token = [string]$login.token
-  if ([string]::IsNullOrWhiteSpace($token)) {
-    throw 'Admin login token was not returned. Cannot continue provisioning.'
-  }
-
-  Invoke-JsonPut "$baseUrl/api/setup/server-config" @{
-    public_base_url = $PublicBaseUrl
-    cors_origins = $CorsOrigins
-  } @{ Authorization = "Bearer $token" } | Out-Null
-  Write-Ok 'Server public URL and CORS configuration updated.'
-
-  $importResult = Import-ProvisionUsers $UsersCsvPath $baseUrl $token $InstallDir
-  $createdUsersCount = [int]$importResult.created
-  $provisionedCredentialsPath = [string]$importResult.credentialsPath
-  if ($createdUsersCount -gt 0) {
-    Write-Ok "Created $createdUsersCount users from CSV."
-  }
-
-  $onboardingDir = New-ClientOnboardingPackage $InstallDir $PublicBaseUrl
-  Write-Ok "Client onboarding package created: $onboardingDir"
-
-  $provisioningRan = $true
 }
 
 Write-Ok 'Installation complete.'
