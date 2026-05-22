@@ -223,8 +223,28 @@ function DiscoverModal({ onAdd, onAddBatch, onClose }) {
     cameraApi.discover(subnets.length > 0 ? { subnets } : undefined)
       .then(res => setDevices(res.data.devices || []))
       .catch((err) => {
+        const status = err.response?.status
         const details = err.response?.data?.details
-        toast.error(details ? `Discovery failed: ${details}` : 'Discovery failed')
+        const error = err.response?.data?.error
+        const passwordResetRequired = Boolean(err.response?.data?.passwordResetRequired)
+
+        if (status === 403 && passwordResetRequired) {
+          toast.error('Discovery blocked: password reset required for this account')
+          return
+        }
+
+        if (status === 403) {
+          toast.error(`Discovery blocked: ${error || 'insufficient permissions'}`)
+          return
+        }
+
+        if (status === 429) {
+          toast.error(error || 'Discovery rate limit reached, please wait and retry')
+          return
+        }
+
+        const message = details || error || err.message
+        toast.error(message ? `Discovery failed: ${message}` : 'Discovery failed')
       })
       .finally(() => setScanning(false))
   }, [discoverySubnets, parseSubnets])
