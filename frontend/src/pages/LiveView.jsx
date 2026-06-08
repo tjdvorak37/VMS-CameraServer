@@ -152,14 +152,16 @@ export default function LiveView() {
                 src={camera.status === 'online' ? streamUrl(camera) : null}
                 cameraName={camera.name}
                 cameraRotation={camera.rotation}
-                onRotate={isOperator ? () => rotateCamera(camera) : null}
+                onRotate={() => rotateCamera(camera)}
+                rotateDisabled={!isOperator}
+                rotateTitle={isOperator ? 'Rotate camera' : 'Rotate requires operator or admin role'}
                 showControls
               />
               {/* Camera info bar */}
               <div className="absolute bottom-0 left-0 right-0 
                               bg-gradient-to-t from-black/70 to-transparent 
                               px-2 pb-1.5 pt-4
-                              opacity-0 group-hover:opacity-100 transition-opacity">
+                              opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-slate-300">{camera.location || 'No location'}</span>
                   <span className="text-slate-400">{camera.resolution}</span>

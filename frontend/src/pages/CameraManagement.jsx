@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Plus, Search, RefreshCw, Loader2, Camera, Wifi, WifiOff,
-  Circle, Trash2, Edit3, Radio, StopCircle, Scan, Image
+  Circle, Trash2, Edit3, Radio, StopCircle, Scan, Image, RotateCw
 } from 'lucide-react'
 import { cameraApi } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
@@ -610,6 +610,22 @@ export default function CameraManagement() {
     }
   }
 
+  const rotateCamera = async (cam) => {
+    const key = `rotate-${cam.id}`
+    setProcessing(p => ({ ...p, [key]: true }))
+    try {
+      const current = Number(cam.rotation) || 0
+      const nextRotation = (current + 90) % 360
+      await cameraApi.update(cam.id, { rotation: nextRotation })
+      toast.success(`${cam.name} rotated to ${nextRotation} deg`)
+      fetchCameras()
+    } catch {
+      toast.error('Failed to rotate camera')
+    } finally {
+      setProcessing(p => ({ ...p, [key]: false }))
+    }
+  }
+
   const handleAddBatch = async (devices, options = {}) => {
     const { username = '', password = '', rtspForDevice } = options
     let added = 0, failed = 0
@@ -765,6 +781,14 @@ export default function CameraManagement() {
                           title="Capture Snapshot"
                         >
                           <Image size={15} />
+                        </button>
+                        <button
+                          onClick={() => rotateCamera(cam)}
+                          disabled={!!processing[`rotate-${cam.id}`]}
+                          className="btn-ghost p-1.5 text-warning hover:text-yellow-300"
+                          title={`Rotate (${Number(cam.rotation) || 0} deg)`}
+                        >
+                          <RotateCw size={15} />
                         </button>
                         <button
                           onClick={() => { setEditCamera(cam); setModal('edit') }}

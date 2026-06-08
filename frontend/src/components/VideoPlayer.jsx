@@ -6,7 +6,16 @@ import { Volume2, VolumeX, Maximize2, RefreshCw, WifiOff, RotateCw } from 'lucid
  * HLS Live Video Player component.
  * src: the HLS .m3u8 manifest URL
  */
-export default function VideoPlayer({ src, cameraName, className = '', showControls = true, cameraRotation = 0, onRotate = null }) {
+export default function VideoPlayer({
+  src,
+  cameraName,
+  className = '',
+  showControls = true,
+  cameraRotation = 0,
+  onRotate = null,
+  rotateDisabled = false,
+  rotateTitle = 'Rotate camera',
+}) {
   const videoRef = useRef(null)
   const hlsRef = useRef(null)
   const [state, setState] = useState({ muted: true, status: 'loading', error: null })
@@ -126,9 +135,9 @@ export default function VideoPlayer({ src, cameraName, className = '', showContr
       )}
 
       {/* Camera name overlay */}
-      <div className="absolute top-0 left-0 right-0 flex items-center justify-between 
-                       bg-gradient-to-b from-black/60 to-transparent px-2 py-1.5
-                       opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+      <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between 
+               bg-gradient-to-b from-black/60 to-transparent px-2 py-1.5
+               opacity-0 group-hover:opacity-100 transition-opacity duration-200">
         <div className="flex items-center gap-1.5">
           <span className={`status-dot ${state.status === 'playing' ? 'status-dot-online' : 'status-dot-offline'}`} />
           <span className="text-xs font-medium text-white truncate max-w-[120px]">{cameraName}</span>
@@ -140,9 +149,9 @@ export default function VideoPlayer({ src, cameraName, className = '', showContr
 
       {/* Controls overlay */}
       {showControls && (
-        <div className="absolute bottom-0 left-0 right-0 flex items-center justify-end gap-1
-                         bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5
-                         opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+        <div className="absolute bottom-0 left-0 right-0 z-20 flex items-center justify-end gap-1
+             bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5
+             opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-200">
           <button
             onClick={toggleMute}
             className="p-1 text-white/70 hover:text-white transition-colors"
@@ -153,8 +162,13 @@ export default function VideoPlayer({ src, cameraName, className = '', showContr
           {typeof onRotate === 'function' && (
             <button
               onClick={onRotate}
-              className="p-1 text-white/70 hover:text-white transition-colors"
-              title="Rotate camera"
+              disabled={rotateDisabled}
+              className={`p-1 transition-colors ${
+                rotateDisabled
+                  ? 'text-white/30 cursor-not-allowed'
+                  : 'text-white/70 hover:text-white'
+              }`}
+              title={rotateTitle}
             >
               <RotateCw size={14} />
             </button>
