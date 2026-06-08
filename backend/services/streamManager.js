@@ -13,6 +13,30 @@ const { getDb } = require('../config/database');
 const activeStreams = new Map();
 const intentionallyStopped = new Set();
 
+function resolveFfmpegBin() {
+  const candidates = [
+    process.env.FFMPEG_PATH,
+    config.FFMPEG_PATH,
+  ].filter(Boolean);
+
+  if (process.platform === 'win32') {
+    candidates.push(
+      'C:\\ffmpeg\\bin\\ffmpeg.exe',
+      'C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe',
+      'C:\\ProgramData\\chocolatey\\bin\\ffmpeg.exe'
+    );
+  }
+
+  for (const candidate of candidates) {
+    try {
+      if (candidate === 'ffmpeg') continue;
+      if (fs.existsSync(candidate)) return candidate;
+    } catch (_) {}
+  }
+
+  return candidates[0] || 'ffmpeg';
+}
+
 function clearStreamArtifacts(streamDir) {
   try {
     const files = fs.readdirSync(streamDir);
@@ -118,7 +142,7 @@ function startStream(camera) {
     m3u8Path,
   );
 
-  const ffmpegBin = config.FFMPEG_PATH || 'ffmpeg';
+  const ffmpegBin = resolveFfmpegBin();
 
   console.log(`[StreamManager] Starting stream for camera ${id} (${camera.name}) using ${ffmpegBin}`);
 

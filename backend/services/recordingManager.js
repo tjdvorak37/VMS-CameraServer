@@ -12,6 +12,30 @@ const { getDb } = require('../config/database');
 // Map of cameraId -> { process, currentFile, startedAt }
 const activeRecordings = new Map();
 
+function resolveFfmpegBin() {
+  const candidates = [
+    process.env.FFMPEG_PATH,
+    config.FFMPEG_PATH,
+  ].filter(Boolean);
+
+  if (process.platform === 'win32') {
+    candidates.push(
+      'C:\\ffmpeg\\bin\\ffmpeg.exe',
+      'C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe',
+      'C:\\ProgramData\\chocolatey\\bin\\ffmpeg.exe'
+    );
+  }
+
+  for (const candidate of candidates) {
+    try {
+      if (candidate === 'ffmpeg') continue;
+      if (fs.existsSync(candidate)) return candidate;
+    } catch (_) {}
+  }
+
+  return candidates[0] || 'ffmpeg';
+}
+
 /**
  * Build an effective RTSP URL, embedding stored credentials if not already in the URL.
  */
@@ -77,9 +101,11 @@ function startRecording(camera) {
     outputPattern,
   ];
 
-  console.log(`[RecordingManager] Starting recording for camera ${id} (${camera.name})`);
+  const ffmpegBin = resolveFfmpegBin();
 
-  const proc = spawn('ffmpeg', args, {
+  console.log(`[RecordingManager] Starting recording for camera ${id} (${camera.name}) using ${ffmpegBin}`);
+
+  const proc = spawn(ffmpegBin, args, {
     detached: false,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
