@@ -3,6 +3,7 @@ const router = express.Router();
 const path = require('path');
 const fs = require('fs');
 const config = require('../config/config');
+const { getDb } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 const streamManager = require('../services/streamManager');
 
@@ -13,7 +14,22 @@ router.get('/:cameraId/live.m3u8', authenticate, (req, res) => {
   const m3u8Path = path.join(streamDir, 'live.m3u8');
 
   if (!fs.existsSync(m3u8Path)) {
-    return res.status(404).json({ error: 'Stream not available. Camera may be offline.' });
+    // Self-heal: if playlist is missing, try to (re)start this camera stream.
+    try {
+      const statuses = streamManager.getAllStreamStatuses();
+      if (!statuses[String(cameraId)]) {
+        const db = getDb();
+        const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(cameraId);
+        if (!camera) {
+          return res.status(404).json({ error: 'Camera not found' });
+        }
+        streamManager.startStream(camera);
+      }
+    } catch (err) {
+      console.error(`[Streams] Failed to auto-start stream for camera ${cameraId}:`, err.message);
+    }
+
+    return res.status(404).json({ error: 'Stream not ready. Retrying...' });
   }
 
   res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
