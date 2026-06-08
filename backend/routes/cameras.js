@@ -1,11 +1,34 @@
 const express = require('express');
 const router = express.Router();
+const fs = require('fs');
+const path = require('path');
 const { body, query, validationResult } = require('express-validator');
 const { getDb } = require('../config/database');
+const config = require('../config/config');
 const { authenticate, requireRole } = require('../middleware/auth');
 const discoveryService = require('../services/discoveryService');
 const streamManager = require('../services/streamManager');
 const recordingManager = require('../services/recordingManager');
+
+function hasFreshManifest(cameraId) {
+  try {
+    const m3u8Path = path.join(config.STREAMS_DIR, String(cameraId), 'live.m3u8');
+    if (!fs.existsSync(m3u8Path)) return false;
+    const stats = fs.statSync(m3u8Path);
+    const ageMs = Date.now() - stats.mtimeMs;
+    return stats.size > 0 && ageMs <= 15000;
+  } catch (_) {
+    return false;
+  }
+}
+
+function withDerivedStatus(camera) {
+  const hasLive = hasFreshManifest(camera.id);
+  return {
+    ...camera,
+    status: hasLive ? 'online' : 'offline',
+  };
+}
 
 // GET /api/cameras
 router.get('/', authenticate, (req, res) => {
@@ -16,7 +39,7 @@ router.get('/', authenticate, (req, res) => {
     cameras = db.prepare(
       `SELECT *, (SELECT file_path FROM recordings WHERE camera_id = cameras.id ORDER BY start_time DESC LIMIT 1) as last_recording
        FROM cameras ORDER BY name ASC`
-    ).all();
+    ).all().map(withDerivedStatus);
   } else {
     // Viewer: only cameras explicitly permitted
     cameras = db.prepare(
@@ -24,7 +47,7 @@ router.get('/', authenticate, (req, res) => {
        FROM cameras c
        JOIN camera_permissions cp ON cp.camera_id = c.id AND cp.user_id = ? AND cp.can_view = 1
        ORDER BY c.name ASC`
-    ).all(req.user.id);
+    ).all(req.user.id).map(withDerivedStatus);
   }
 
   return res.json(cameras);
@@ -71,18 +94,22 @@ router.post(
     const {
       name, ip_address, port = 554, rtsp_url, username, password,
       protocol = 'RTSP', manufacturer, model, location, recording_enabled = 1,
-      onvif_port = 80, resolution = '1920x1080', fps = 15,
+      onvif_port = 80, resolution = '1920x1080', fps = 15, rotation = 0,
     } = req.body;
+
+    const normalizedRotation = [0, 90, 180, 270].includes(Number(rotation))
+      ? Number(rotation)
+      : 0;
 
     try {
       const result = db.prepare(`
         INSERT INTO cameras
           (name, ip_address, port, rtsp_url, username, password, protocol,
-           manufacturer, model, location, recording_enabled, onvif_port, resolution, fps)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           manufacturer, model, location, recording_enabled, onvif_port, resolution, fps, rotation)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(name, ip_address, port, rtsp_url, username || null, password || null,
              protocol, manufacturer || null, model || null, location || null,
-             recording_enabled ? 1 : 0, onvif_port, resolution, fps);
+             recording_enabled ? 1 : 0, onvif_port, resolution, fps, normalizedRotation);
 
       const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(result.lastInsertRowid);
 
@@ -117,7 +144,7 @@ router.put(
       const allowedFields = [
         'name', 'ip_address', 'port', 'rtsp_url', 'username', 'password',
         'protocol', 'manufacturer', 'model', 'location', 'recording_enabled',
-        'snapshot_url', 'onvif_port', 'resolution', 'fps',
+        'snapshot_url', 'onvif_port', 'resolution', 'fps', 'rotation',
       ];
 
       const updates = {};
@@ -130,6 +157,11 @@ router.put(
       });
 
       if (Object.keys(updates).length > 0) {
+        if (updates.rotation !== undefined) {
+          const normalizedRotation = Number(updates.rotation);
+          updates.rotation = [0, 90, 180, 270].includes(normalizedRotation) ? normalizedRotation : 0;
+        }
+
         const sets = Object.keys(updates).map(k => `${k} = ?`).join(', ');
         db.prepare(`UPDATE cameras SET ${sets} WHERE id = ?`).run(...Object.values(updates), camera.id);
       }
@@ -139,7 +171,8 @@ router.put(
         updates.rtsp_url !== undefined ||
         updates.username !== undefined ||
         updates.password !== undefined ||
-        updates.port !== undefined;
+        updates.port !== undefined ||
+        updates.rotation !== undefined;
 
       const recordingRelevantChanged =
         streamRelevantChanged || updates.recording_enabled !== undefined;

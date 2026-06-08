@@ -173,6 +173,10 @@ function startStream(camera) {
   proc.on('error', (err) => {
     console.error(`[StreamManager] FFmpeg error for camera ${id}:`, err.message);
     activeStreams.delete(id);
+    try {
+      const db = getDb();
+      db.prepare("UPDATE cameras SET status = 'offline', stream_pid = NULL WHERE id = ?").run(id);
+    } catch (_) {}
   });
 
   activeStreams.set(id, {
