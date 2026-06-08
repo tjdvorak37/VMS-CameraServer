@@ -53,6 +53,7 @@ function runMigrations(db) {
     ['record_pid', 'INTEGER'],
     ['last_seen', 'DATETIME'],
     ['thumbnail_path', 'TEXT'],
+    ['rotation', 'INTEGER DEFAULT 0'],
   ]);
 }
 
@@ -108,6 +109,7 @@ function initializeSchema(db) {
       onvif_port       INTEGER DEFAULT 80,
       resolution       TEXT DEFAULT '1920x1080',
       fps              INTEGER DEFAULT 15,
+      rotation         INTEGER DEFAULT 0,
       stream_pid       INTEGER,
       record_pid       INTEGER,
       created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,

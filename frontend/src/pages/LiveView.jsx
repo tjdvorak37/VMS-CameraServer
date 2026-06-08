@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { Grid, Layout, Maximize2, RefreshCw, Camera as CameraIcon } from 'lucide-react'
 import VideoPlayer from '../components/VideoPlayer'
 import { cameraApi } from '../services/api'
+import { useAuth } from '../contexts/AuthContext'
+import toast from 'react-hot-toast'
 
 const LAYOUTS = [
   { id: 1,  label: '1×1',  cols: 1 },
@@ -35,6 +37,7 @@ function LayoutButton({ layout, active, onClick }) {
 }
 
 export default function LiveView() {
+  const { isOperator } = useAuth()
   const [cameras, setCameras] = useState([])
   const [layout, setLayout] = useState(4)
   const [selected, setSelected] = useState(null)
@@ -60,6 +63,23 @@ export default function LiveView() {
 
   const streamUrl = (camera) =>
     `/api/streams/${camera.id}/live.m3u8`
+
+  const rotateCamera = async (camera) => {
+    if (!isOperator) return
+
+    const current = Number(camera.rotation) || 0
+    const nextRotation = (current + 90) % 360
+
+    try {
+      await cameraApi.update(camera.id, { rotation: nextRotation })
+      setCameras(prev => prev.map(c => (
+        c.id === camera.id ? { ...c, rotation: nextRotation } : c
+      )))
+      toast.success(`${camera.name} rotated to ${nextRotation}\u00b0`)
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to rotate camera')
+    }
+  }
 
   if (loading) {
     return (
@@ -131,6 +151,8 @@ export default function LiveView() {
               <VideoPlayer
                 src={camera.status === 'online' ? streamUrl(camera) : null}
                 cameraName={camera.name}
+                cameraRotation={camera.rotation}
+                onRotate={isOperator ? () => rotateCamera(camera) : null}
                 showControls
               />
               {/* Camera info bar */}

@@ -24,6 +24,12 @@ function Ensure-Admin {
   }
 }
 
+function Ensure-Command([string]$Name, [string]$Hint) {
+  if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
+    throw "$Name is required. $Hint"
+  }
+}
+
 function Ensure-Directory([string]$Path) {
   New-Item -Path $Path -ItemType Directory -Force | Out-Null
 }
@@ -111,34 +117,51 @@ function Update-EnvStoragePaths([string]$EnvPath, [string]$DataRoot) {
   Write-Ok "Updated storage paths in: $EnvPath"
 }
 
-function Ensure-Service([string]$SvcName, [string]$LauncherPath, [switch]$NoRestart) {
-  $binPath = "cmd.exe /c `"$LauncherPath`""
+function Ensure-Service([string]$SvcName, [string]$InstallDir, [switch]$NoRestart) {
+  Ensure-Command node 'Install Node.js 22 LTS and retry.'
 
-  if (Get-Service -Name $SvcName -ErrorAction SilentlyContinue) {
-    Write-Info "Reconfiguring existing service: $SvcName"
-    $cfg = & sc.exe config $SvcName 'binPath=' $binPath 'start=' 'auto' 2>&1
-    if ($LASTEXITCODE -ne 0) {
-      throw "Failed to reconfigure service '$SvcName'. sc.exe output: $($cfg -join ' | ')"
-    }
-  } else {
-    Write-Info "Creating service: $SvcName"
-    $created = & sc.exe create $SvcName 'binPath=' $binPath 'start=' 'auto' 'DisplayName=' 'VMS Camera Server' 2>&1
-    if ($LASTEXITCODE -ne 0) {
-      throw "Failed to create service '$SvcName'. sc.exe output: $($created -join ' | ')"
-    }
+  $serviceInstaller = Join-Path $InstallDir 'installer\windows\install-vms-service.js'
+  if (-not (Test-Path $serviceInstaller)) {
+    throw "Missing service installer helper: $serviceInstaller"
   }
 
-  & sc.exe description $SvcName 'VMS Camera Server backend service' | Out-Null
+  if (Get-Service -Name $SvcName -ErrorAction SilentlyContinue) {
+    Write-Info "Removing existing service: $SvcName"
+    try { & sc.exe stop $SvcName | Out-Null } catch {}
+    Start-Sleep -Seconds 2
+    & sc.exe delete $SvcName | Out-Null
+    Start-Sleep -Seconds 2
+  }
+
+  $serviceArgs = @(
+    $serviceInstaller,
+    '--installDir', $InstallDir,
+    '--backendDir', (Join-Path $InstallDir 'backend'),
+    '--serviceName', $SvcName,
+    '--serviceDescription', 'VMS Camera Server backend service'
+  )
+
+  if ($NoRestart) {
+    $serviceArgs += '--noStart'
+  }
+
+  Write-Info "Installing service: $SvcName"
+  $proc = Start-Process -FilePath 'node' -ArgumentList $serviceArgs -WorkingDirectory $InstallDir -Wait -PassThru -NoNewWindow
+  if ($proc.ExitCode -ne 0) {
+    throw "Failed to install service '$SvcName'. Exit code: $($proc.ExitCode)"
+  }
 
   if ($NoRestart) {
     Write-Warn 'SkipServiceRestart was set. Service was configured but not started.'
     return
   }
 
-  Write-Info "Starting service: $SvcName"
-  $start = & sc.exe start $SvcName 2>&1
-  if ($LASTEXITCODE -ne 0 -and -not (($start -join ' ') -match 'SERVICE_ALREADY_RUNNING')) {
-    throw "Failed to start service '$SvcName'. sc.exe output: $($start -join ' | ')"
+  Write-Info "Waiting for service to report Running: $SvcName"
+  Start-Sleep -Seconds 3
+  $svc = Get-Service -Name $SvcName -ErrorAction SilentlyContinue
+  if (-not $svc -or $svc.Status -ne 'Running') {
+    $stateLabel = if ($svc) { [string]$svc.Status } else { 'NotFound' }
+    throw "Service '$SvcName' is not running after install (state: $stateLabel)."
   }
 }
 
@@ -215,6 +238,17 @@ if (-not $SkipAppCopy) {
   Write-Warn 'SkipAppCopy was set. Application file copy skipped.'
 }
 
+Ensure-Command npm 'Install Node.js 22 LTS (with npm) and retry.'
+
+Write-Info 'Installing backend dependencies for the target install...'
+Push-Location $TargetInstallDir
+try {
+  npm install --prefix backend --omit=dev
+}
+finally {
+  Pop-Location
+}
+
 if (-not $SkipDataCopy) {
   if (Test-Path $SourceDataDir) {
     Write-Info 'Copying VMSData to target data directory...'
@@ -247,7 +281,7 @@ Update-EnvStoragePaths $rootEnv $TargetDataDir
 Update-EnvStoragePaths $backendEnv $TargetDataDir
 
 $launcherPath = Ensure-Launcher $TargetInstallDir
-Ensure-Service $ServiceName $launcherPath -NoRestart:$SkipServiceRestart
+Ensure-Service $ServiceName $TargetInstallDir -NoRestart:$SkipServiceRestart
 
 if (-not $SkipServiceRestart) {
   Write-Info 'Waiting for health check...'

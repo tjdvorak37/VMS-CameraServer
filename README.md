@@ -252,7 +252,7 @@ On the target Windows server:
 4. Optional: run `INSTALL-WINDOWS-SERVER-WALKTHROUGH.cmd` for prompted proprietary values
 5. For existing installs on `C:`, run `INSTALL-WINDOWS-SERVER-MIGRATE-C-TO-V.cmd` for safe cutover
 
-The server installer configures storage paths, environment, firewall, dependencies, Windows service, initial admin setup, and server URL settings.
+The server installer configures storage paths, environment, firewall, dependencies, a Windows service, initial admin setup, and server URL settings.
 
 After server install:
 1. Open `V:\VMS-CameraServer\client-onboarding`

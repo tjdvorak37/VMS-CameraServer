@@ -4,6 +4,7 @@ param(
   [int]$DiscoveryMaxHosts = 4096,
   [int]$OnvifDiscoveryTimeoutMs = 12000,
   [int]$NetworkScanTimeoutMs = 5000,
+  [string]$ServiceName = 'VMSCameraServer',
   [string]$StartupTaskName = 'VMSCameraServer-Startup',
   [string[]]$TestCameraIps = @(),
   [switch]$ShowLogTail,
@@ -59,6 +60,65 @@ function Wait-ForHealth([string]$BaseUrl, [int]$TimeoutSec = 60) {
   return $false
 }
 
+function Get-ScState([string]$TargetServiceName) {
+  $output = @(& sc.exe query $TargetServiceName 2>&1)
+  $stateLine = $output | Select-String 'STATE\s*:' | Select-Object -First 1
+  if (-not $stateLine) {
+    return ''
+  }
+
+  $match = [regex]::Match([string]$stateLine.Line, 'STATE\s*:\s*\d+\s+([A-Z_]+)')
+  if (-not $match.Success) {
+    return ''
+  }
+
+  return [string]$match.Groups[1].Value
+}
+
+function Wait-ForServiceState([string]$TargetServiceName, [string]$DesiredState, [int]$TimeoutSec = 60) {
+  $deadline = (Get-Date).AddSeconds($TimeoutSec)
+  while ((Get-Date) -lt $deadline) {
+    if ((Get-ScState $TargetServiceName) -eq $DesiredState) {
+      return $true
+    }
+    Start-Sleep -Seconds 2
+  }
+
+  return $false
+}
+
+function Restart-ServiceSafe([string]$TargetServiceName) {
+  & sc.exe stop $TargetServiceName | Out-Null
+  if (-not (Wait-ForServiceState -TargetServiceName $TargetServiceName -DesiredState 'STOPPED' -TimeoutSec 60)) {
+    $queryEx = @(& sc.exe queryex $TargetServiceName 2>&1)
+    $pidLine = $queryEx | Select-String 'PID\s*:' | Select-Object -First 1
+    $servicePid = 0
+    if ($pidLine) {
+      $pidMatch = [regex]::Match([string]$pidLine.Line, 'PID\s*:\s*(\d+)')
+      if ($pidMatch.Success) {
+        $servicePid = [int]$pidMatch.Groups[1].Value
+      }
+    }
+
+    if ($servicePid -gt 0 -and $servicePid -ne $PID) {
+      $proc = Get-Process -Id $servicePid -ErrorAction SilentlyContinue
+      if ($proc -and ($proc.ProcessName -notmatch '^(powershell|pwsh|conhost)$')) {
+        Write-Warn "Service $TargetServiceName was stuck stopping; forcing PID $servicePid ($($proc.ProcessName))."
+        Stop-Process -Id $servicePid -Force -ErrorAction Stop
+      }
+    }
+
+    if (-not (Wait-ForServiceState -TargetServiceName $TargetServiceName -DesiredState 'STOPPED' -TimeoutSec 15)) {
+      throw "Service $TargetServiceName did not reach STOPPED state."
+    }
+  }
+
+  & sc.exe start $TargetServiceName | Out-Null
+  if (-not (Wait-ForServiceState -TargetServiceName $TargetServiceName -DesiredState 'RUNNING' -TimeoutSec 60)) {
+    throw "Service $TargetServiceName did not reach RUNNING state."
+  }
+}
+
 if ($Subnets.Count -eq 0) {
   Write-Warn 'No subnets were provided. Existing DISCOVERY_SUBNETS values will remain unchanged.'
 }
@@ -91,12 +151,30 @@ foreach ($envPath in $targets) {
   Write-Ok "Updated discovery settings in: $envPath"
 }
 
-Write-Info "Restarting startup task: $StartupTaskName"
-$runOutput = & schtasks /Run /TN $StartupTaskName 2>&1
-if ($LASTEXITCODE -ne 0) {
-  Write-Warn "Could not run startup task '$StartupTaskName'. Output: $($runOutput -join ' | ')"
+if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
+  Write-Info "Restarting Windows service: $ServiceName"
+  try {
+    Restart-ServiceSafe -TargetServiceName $ServiceName
+    Write-Ok "Windows service restarted: $ServiceName"
+  }
+  catch {
+    Write-Warn "Service restart failed for '$ServiceName': $($_.Exception.Message)"
+    Write-Info "Falling back to startup task: $StartupTaskName"
+    $runOutput = & schtasks /Run /TN $StartupTaskName 2>&1
+    if ($LASTEXITCODE -ne 0) {
+      Write-Warn "Could not run startup task '$StartupTaskName'. Output: $($runOutput -join ' | ')"
+    } else {
+      Write-Ok "Startup task triggered: $StartupTaskName"
+    }
+  }
 } else {
-  Write-Ok "Startup task triggered: $StartupTaskName"
+  Write-Info "Service '$ServiceName' was not found. Restarting startup task: $StartupTaskName"
+  $runOutput = & schtasks /Run /TN $StartupTaskName 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    Write-Warn "Could not run startup task '$StartupTaskName'. Output: $($runOutput -join ' | ')"
+  } else {
+    Write-Ok "Startup task triggered: $StartupTaskName"
+  }
 }
 
 Write-Info 'Waiting for backend health check...'

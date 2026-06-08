@@ -25,6 +25,7 @@ module.exports = {
   SEGMENT_DURATION: parseInt(process.env.SEGMENT_DURATION) || 600, // seconds (10 min segments)
 
   // HLS settings
+  FFMPEG_PATH: process.env.FFMPEG_PATH || 'ffmpeg',
   HLS_TIME: parseInt(process.env.HLS_TIME) || 2,        // seconds per HLS chunk
   HLS_LIST_SIZE: parseInt(process.env.HLS_LIST_SIZE) || 5, // chunks in playlist
 

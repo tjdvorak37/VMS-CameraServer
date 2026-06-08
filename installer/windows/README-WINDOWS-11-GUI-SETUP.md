@@ -86,7 +86,7 @@ What the installer does:
 - Installs backend dependencies
 - Builds frontend assets if needed
 - Opens Windows Firewall for TCP port `3001`
-- Creates and starts the `VMSCameraServer` Windows service
+- Creates and starts the Windows service (`VMSCameraServer` by default; some installs use `vmscameraserver.exe`)
 - Completes initial setup automatically in one-click mode
 - Generates `V:\VMS-CameraServer\client-onboarding` for user-device installs
 
@@ -100,7 +100,7 @@ Screenshot placeholder:
 1. Press the Windows key.
 2. Type **Services**.
 3. Open the **Services** app.
-4. Find `VMSCameraServer` in the list.
+4. Find `VMSCameraServer` (or `vmscameraserver.exe`) in the list.
 5. Confirm:
    - **Status** is `Running`
    - **Startup Type** is `Automatic`
@@ -110,7 +110,7 @@ If it is not running:
 - If it fails, rerun the installer as Administrator after checking Node.js and FFmpeg.
 
 Screenshot placeholder:
-- Services window showing `VMSCameraServer` with Status `Running` and Startup Type `Automatic`.
+- Services window showing `VMSCameraServer` (or `vmscameraserver.exe`) with Status `Running` and Startup Type `Automatic`.
 
 ---
 
@@ -123,7 +123,7 @@ From another PC on the same network:
 - Open `http://<windows-pc-ip>:3001/login`
 
 If the page does not load:
-- Confirm the `VMSCameraServer` service is running.
+- Confirm the `VMSCameraServer` or `vmscameraserver.exe` service is running.
 - Confirm Windows Firewall allowed port `3001`.
 - Confirm no other app is already using port `3001`.
 
@@ -190,7 +190,7 @@ If you change runtime settings in **Settings > Server Setup**, restart the servi
 GUI steps:
 
 1. Open **Services**.
-2. Right-click `VMSCameraServer`.
+2. Right-click `VMSCameraServer` (or `vmscameraserver.exe`).
 3. Click **Restart**.
 
 Use this after changing values such as:
@@ -200,7 +200,7 @@ Use this after changing values such as:
 - Environment mode
 
 Screenshot placeholder:
-- Services window context menu for `VMSCameraServer` with **Restart** visible.
+- Services window context menu for `VMSCameraServer` (or `vmscameraserver.exe`) with **Restart** visible.
 
 ---
 
@@ -209,14 +209,17 @@ Screenshot placeholder:
 To ensure the host and backend recover automatically after patch reboots:
 
 1. Open **Command Prompt** as Administrator.
-2. Check service status:
+2. Set your service name once:
+   - `set SVC=vmscameraserver.exe`
+3. Check service status:
+   - `sc query %SVC%`
+4. If `%SVC%` is unknown, test:
+   - `sc query vmscameraserver.exe`
    - `sc query VMSCameraServer`
-3. If installer output showed service error 1053, check startup task fallback:
-   - `schtasks /Query /TN "VMSCameraServer-Startup" /V /FO LIST`
-4. If no startup task exists, create one:
-   - `schtasks /Create /TN "VMSCameraServer-Startup" /SC ONSTART /RU SYSTEM /RL HIGHEST /TR "cmd.exe /c \"V:\VMS-CameraServer\run-vms-server.cmd\"" /F`
-5. Optional immediate test without reboot:
-   - `schtasks /Run /TN "VMSCameraServer-Startup"`
+   - Then set `%SVC%` to the one that exists.
+5. If the service is missing, rerun the installer as Administrator.
+6. Optional immediate test without reboot:
+   - `sc start %SVC%`
 
 Notes:
 - Windows can auto-start services/tasks after OS restarts, but cannot power on a physically powered-off machine by itself.

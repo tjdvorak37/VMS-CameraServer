@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import Hls from 'hls.js'
-import { Volume2, VolumeX, Maximize2, RefreshCw, WifiOff } from 'lucide-react'
+import { Volume2, VolumeX, Maximize2, RefreshCw, WifiOff, RotateCw } from 'lucide-react'
 
 /**
  * HLS Live Video Player component.
  * src: the HLS .m3u8 manifest URL
  */
-export default function VideoPlayer({ src, cameraName, className = '', showControls = true }) {
+export default function VideoPlayer({ src, cameraName, className = '', showControls = true, cameraRotation = 0, onRotate = null }) {
   const videoRef = useRef(null)
   const hlsRef = useRef(null)
   const [state, setState] = useState({ muted: true, status: 'loading', error: null })
@@ -99,6 +99,7 @@ export default function VideoPlayer({ src, cameraName, className = '', showContr
         playsInline
         autoPlay
         className="w-full h-full object-cover"
+        style={{ transform: `rotate(${Number(cameraRotation) || 0}deg)` }}
       />
 
       {/* Loading overlay */}
@@ -149,6 +150,15 @@ export default function VideoPlayer({ src, cameraName, className = '', showContr
           >
             {state.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
           </button>
+          {typeof onRotate === 'function' && (
+            <button
+              onClick={onRotate}
+              className="p-1 text-white/70 hover:text-white transition-colors"
+              title="Rotate camera"
+            >
+              <RotateCw size={14} />
+            </button>
+          )}
           <button
             onClick={handleFullscreen}
             className="p-1 text-white/70 hover:text-white transition-colors"

@@ -39,13 +39,13 @@ If this host already has an older install on `C:`, choose **Migrate Existing C: 
 
 10. On each user device, run `INSTALL-VMS-CLIENT.cmd`.
 
-11. If you later change runtime settings in **Server Setup**, restart the `VMSCameraServer` service from the Windows **Services** app.
+11. If you later change runtime settings in **Server Setup**, restart the VMS service from the Windows **Services** app (`VMSCameraServer` or `vmscameraserver.exe`).
 
 12. Validate auto-start for reboot scenarios:
-- Run `sc query VMSCameraServer` in Administrator Command Prompt.
-- If service startup had error 1053 during install, validate or create startup task fallback:
-	- `schtasks /Query /TN "VMSCameraServer-Startup" /V /FO LIST`
-	- `schtasks /Create /TN "VMSCameraServer-Startup" /SC ONSTART /RU SYSTEM /RL HIGHEST /TR "cmd.exe /c \"V:\VMS-CameraServer\run-vms-server.cmd\"" /F`
+	- In Administrator Command Prompt, set the installed service name once: `set SVC=vmscameraserver.exe`.
+	- Validate with `sc query %SVC%`.
+	- If the service is not running, use `sc stop %SVC%` then `sc start %SVC%`.
+	- If `%SVC%` is unknown, test with `sc query vmscameraserver.exe` and `sc query VMSCameraServer`, then set `%SVC%` to the one that exists.
 
 ---
 
@@ -55,7 +55,7 @@ The packaged installer normally:
 - installs to `V:\VMS-CameraServer`
 - stores data under `V:\VMSData`
 - opens Windows Firewall for TCP `3001`
-- creates the `VMSCameraServer` Windows service
+- creates the Windows service (`VMSCameraServer` by default; some installs use `vmscameraserver.exe`)
 - auto-completes setup with admin defaults (one-click mode)
 - creates a `client-onboarding` folder for user devices
 - supports CSV user provisioning with forced first-login password reset
@@ -70,7 +70,7 @@ If you prefer running migration directly from command line, use:
 ## Quick checks
 
 - Browser opens `http://localhost:3001/login`
-- `VMSCameraServer` shows as `Running` in Services
+- `VMSCameraServer` or `vmscameraserver.exe` shows as `Running` in Services
 - You can sign in after setup
 - Recordings are written to the data drive
 

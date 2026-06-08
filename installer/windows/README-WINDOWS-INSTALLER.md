@@ -11,8 +11,8 @@
 - Installs backend dependencies
 - Uses existing frontend dist (or builds if missing)
 - Opens firewall port `3001`
-- Creates and starts a Windows service (`VMSCameraServer`)
-- If Windows service start returns 1053, registers a startup task fallback (`<ServiceName>-Startup`) to auto-start backend at boot
+- Creates and starts a Windows service (`VMSCameraServer` by default; some installs use `vmscameraserver.exe`)
+- Uses a real Windows service wrapper so the backend starts under Service Control Manager supervision
 - Completes first-run setup automatically (admin + system limits)
 - Applies Public Base URL and CORS values
 - Builds a `client-onboarding` folder for user-device installs
@@ -96,33 +96,45 @@ Notes for secure onboarding:
 
 ## Auto-start after reboot
 
-The preferred path is Windows service auto-start. Validate with:
+The preferred path is Windows service auto-start. Use one variable so commands work for either service name:
 
 ```cmd
+set SVC=vmscameraserver.exe
+sc query %SVC%
+```
+
+If needed, detect available names first:
+
+```cmd
+sc query vmscameraserver.exe
 sc query VMSCameraServer
 ```
 
-If the installer reports service start error 1053, it registers a scheduled task fallback named `<ServiceName>-Startup` that runs at startup under `SYSTEM`.
+If the installer reports a startup error, restart the service and check the backend log at `backend\logs\server.log`.
 
-Validate task fallback with:
+Validate service status with:
 
 ```cmd
-schtasks /Query /TN "VMSCameraServer-Startup" /V /FO LIST
+sc query %SVC%
 ```
 
-Manual fallback setup on existing installs:
+Manual service restart on existing installs:
 
 ```cmd
-schtasks /Create /TN "VMSCameraServer-Startup" /SC ONSTART /RU SYSTEM /RL HIGHEST /TR "cmd.exe /c \"V:\VMS-CameraServer\run-vms-server.cmd\"" /F
+sc stop %SVC%
+sc start %SVC%
 ```
 
 Notes:
 - If you place nginx/IIS in front of the backend, use that public URL instead of `:3001`.
-- If you later change runtime server values in **Settings > Server Setup**, restart the backend service.
+- If you later change runtime server values in **Settings > Server Setup**, restart the service.
 - If you are using the packaged ZIP, you can also launch `INSTALL-WINDOWS-SERVER.cmd` from the extracted folder.
 - The packaged ZIP includes `INSTALL-WINDOWS-SERVER-WALKTHROUGH.cmd` for guided prompting.
 - The packaged ZIP includes `INSTALL-WINDOWS-CLIENT.cmd` for direct desktop-client install on non-server devices.
 - The packaged ZIP includes `VMS-SETUP-LAUNCHER.cmd` for one-window launch options.
+
+Troubleshooting:
+- If `run-vms-server.cmd` reports that the file is being used by another process, the backend is usually already running under the Windows service. Stop it with `sc stop %SVC%` before launching the batch file directly.
 
 ## Migration from C: to V:
 
@@ -148,7 +160,7 @@ powershell -ExecutionPolicy Bypass -File installer\windows\migrate-vms-to-v-driv
 	-TargetInstallDir "V:\VMS-CameraServer" `
 	-SourceDataDir "C:\VMSData" `
 	-TargetDataDir "V:\VMSData" `
-	-ServiceName "VMSCameraServer"
+	-ServiceName "vmscameraserver.exe"
 ```
 
 What it does:
@@ -156,7 +168,7 @@ What it does:
 - Copies app files to `V:\VMS-CameraServer` (excluding node_modules/build artifacts).
 - Copies data from `C:\VMSData` and legacy `backend\data` into `V:\VMSData`.
 - Normalizes `.env` and `backend\.env` storage paths to `V:/VMSData/...`.
-- Rebinds and starts the Windows service against `V:\VMS-CameraServer\run-vms-server.cmd`.
+- Rebinds and starts the backend via the Windows service that runs `V:\VMS-CameraServer\backend\server.js`.
 - Verifies `http://localhost:3001/api/health`.
 
 Safe-ops note:
@@ -183,4 +195,4 @@ CMD wrapper version:
 installer\windows\configure-vms-discovery.cmd -InstallDir "V:\VMS-CameraServer" -Subnets "192.168.10.0/24","192.168.20.0/24" -DiscoveryMaxHosts 4096 -OnvifDiscoveryTimeoutMs 12000 -NetworkScanTimeoutMs 5000 -TestCameraIps "192.168.10.50" -ShowLogTail
 ```
 
-This script updates both `V:\VMS-CameraServer\.env` and `V:\VMS-CameraServer\backend\.env`, restarts startup task `VMSCameraServer-Startup`, checks health at `http://localhost:3001/api/health`, and can test camera reachability on ports `554`, `80`, and `3702`.
+This script updates both `V:\VMS-CameraServer\.env` and `V:\VMS-CameraServer\backend\.env`, restarts the configured service name (for example `VMSCameraServer` or `vmscameraserver.exe`), checks health at `http://localhost:3001/api/health`, and can test camera reachability on ports `554`, `80`, and `3702`.

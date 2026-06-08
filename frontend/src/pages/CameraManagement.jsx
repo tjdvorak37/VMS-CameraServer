@@ -58,6 +58,7 @@ function AddEditModal({ camera, onClose, onSave }) {
     location: camera?.location || '',
     resolution: camera?.resolution || '1920x1080',
     fps: camera?.fps || 15,
+    rotation: Number(camera?.rotation) || 0,
     recording_enabled: camera?.recording_enabled !== 0,
   })
   const [saving, setSaving] = useState(false)
@@ -170,6 +171,15 @@ function AddEditModal({ camera, onClose, onSave }) {
                 <option value="15">15 fps</option>
                 <option value="10">10 fps</option>
                 <option value="5">5 fps</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Rotation</label>
+              <select className="input" value={form.rotation} onChange={e => setForm(f => ({ ...f, rotation: parseInt(e.target.value, 10) || 0 }))}>
+                <option value="0">0° (Normal)</option>
+                <option value="90">90°</option>
+                <option value="180">180° (Upside down)</option>
+                <option value="270">270°</option>
               </select>
             </div>
             <div className="col-span-2">
@@ -807,6 +817,7 @@ export default function CameraManagement() {
               manufacturer: device.manufacturer,
               model: device.model,
               onvif_port: device.onvif_port,
+              rotation: 0,
             })
             setModal('add')
           }}

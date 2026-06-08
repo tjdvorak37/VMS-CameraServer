@@ -38,6 +38,23 @@ function Ensure-Command($name, $hint) {
   }
 }
 
+function Resolve-CommandPath([string]$Name) {
+  $cmd = Get-Command $Name -ErrorAction SilentlyContinue
+  if (-not $cmd) {
+    return ''
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace([string]$cmd.Source)) {
+    return [string]$cmd.Source
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace([string]$cmd.Path)) {
+    return [string]$cmd.Path
+  }
+
+  return ''
+}
+
 function Read-OptionalValue([string]$Label, [string]$DefaultValue) {
   $prompt = if ([string]::IsNullOrWhiteSpace($DefaultValue)) {
     "$Label"
@@ -99,6 +116,160 @@ function Wait-ForHealth([string]$BaseUrl, [int]$TimeoutSec = 90) {
   }
 
   return $false
+}
+
+function Get-ScQueryOutput([string]$ServiceName, [switch]$Extended) {
+  if ($Extended) {
+    return @(& sc.exe queryex $ServiceName 2>&1)
+  }
+
+  return @(& sc.exe query $ServiceName 2>&1)
+}
+
+function Get-ServiceStateFromSc([string[]]$ScOutput) {
+  $stateLine = $ScOutput | Select-String 'STATE\s*:' | Select-Object -First 1
+  if (-not $stateLine) {
+    return ''
+  }
+
+  $match = [regex]::Match([string]$stateLine.Line, 'STATE\s*:\s*\d+\s+([A-Z_]+)')
+  if (-not $match.Success) {
+    return ''
+  }
+
+  return [string]$match.Groups[1].Value
+}
+
+function Get-ServicePidFromSc([string[]]$ScOutput) {
+  $pidLine = $ScOutput | Select-String 'PID\s*:' | Select-Object -First 1
+  if (-not $pidLine) {
+    return 0
+  }
+
+  $match = [regex]::Match([string]$pidLine.Line, 'PID\s*:\s*(\d+)')
+  if (-not $match.Success) {
+    return 0
+  }
+
+  return [int]$match.Groups[1].Value
+}
+
+function Wait-ForServiceState([string]$ServiceName, [string]$DesiredState, [int]$TimeoutSec = 60) {
+  $deadline = (Get-Date).AddSeconds($TimeoutSec)
+
+  while ((Get-Date) -lt $deadline) {
+    $query = Get-ScQueryOutput -ServiceName $ServiceName
+    $state = Get-ServiceStateFromSc $query
+    if ($state -eq $DesiredState) {
+      return $true
+    }
+    Start-Sleep -Seconds 2
+  }
+
+  return $false
+}
+
+function Stop-ServiceRobust([string]$ServiceName, [int]$TimeoutSec = 60) {
+  $initialQuery = Get-ScQueryOutput -ServiceName $ServiceName -Extended
+  $initialState = Get-ServiceStateFromSc $initialQuery
+  if ($initialState -eq 'STOPPED') {
+    return
+  }
+
+  try { & sc.exe stop $ServiceName | Out-Null } catch {}
+
+  if (Wait-ForServiceState -ServiceName $ServiceName -DesiredState 'STOPPED' -TimeoutSec $TimeoutSec) {
+    return
+  }
+
+  $stuckQuery = Get-ScQueryOutput -ServiceName $ServiceName -Extended
+  $servicePid = Get-ServicePidFromSc $stuckQuery
+  if ($servicePid -gt 0 -and $servicePid -ne $PID) {
+    $proc = Get-Process -Id $servicePid -ErrorAction SilentlyContinue
+    if ($proc -and ($proc.ProcessName -notmatch '^(powershell|pwsh|conhost)$')) {
+      Write-Warn "Service $ServiceName is stuck in $($initialState); forcing PID $servicePid ($($proc.ProcessName)) to stop."
+      Stop-Process -Id $servicePid -Force -ErrorAction Stop
+    }
+  }
+
+  if (-not (Wait-ForServiceState -ServiceName $ServiceName -DesiredState 'STOPPED' -TimeoutSec 15)) {
+    $finalQuery = Get-ScQueryOutput -ServiceName $ServiceName
+    $finalState = Get-ServiceStateFromSc $finalQuery
+    throw "Service $ServiceName did not reach STOPPED state (current state: $finalState)."
+  }
+}
+
+function Start-ServiceRobust([string]$ServiceName, [int]$TimeoutSec = 60) {
+  $startOutput = @(& sc.exe start $ServiceName 2>&1)
+  $startExitCode = $LASTEXITCODE
+  $alreadyRunning = ($startOutput | Select-String 'FAILED 1056' -SimpleMatch | Select-Object -First 1)
+
+  if ($startExitCode -ne 0 -and -not $alreadyRunning) {
+    throw "Failed to start service $ServiceName. sc.exe output: $($startOutput -join ' | ')"
+  }
+
+  if (-not (Wait-ForServiceState -ServiceName $ServiceName -DesiredState 'RUNNING' -TimeoutSec $TimeoutSec)) {
+    $finalQuery = Get-ScQueryOutput -ServiceName $ServiceName
+    $finalState = Get-ServiceStateFromSc $finalQuery
+    throw "Service $ServiceName did not reach RUNNING state (current state: $finalState)."
+  }
+}
+
+function Resolve-ListeningPids([int]$Port) {
+  try {
+    return @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue |
+      Select-Object -ExpandProperty OwningProcess -Unique)
+  }
+  catch {
+    return @()
+  }
+}
+
+function Stop-VmsPortConflicts([int]$Port, [string]$InstallPath) {
+  $listenerPids = Resolve-ListeningPids $Port
+  if (-not $listenerPids -or $listenerPids.Count -eq 0) {
+    return
+  }
+
+  foreach ($ownerPid in $listenerPids) {
+    if (-not $ownerPid -or $ownerPid -le 4) {
+      continue
+    }
+
+    $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerPid" -ErrorAction SilentlyContinue
+    if (-not $proc) {
+      continue
+    }
+
+    $procName = [string]$proc.Name
+    $cmd = [string]$proc.CommandLine
+    $installHint = [regex]::Escape($InstallPath)
+    $isLikelyVmsBackend =
+      ($procName -ieq 'node.exe') -and (
+        $cmd -match 'server\.js' -or
+        $cmd -match 'VMS-CameraServer' -or
+        $cmd -match $installHint
+      )
+
+    if ($isLikelyVmsBackend) {
+      Write-Warn "Port $Port is currently used by stale VMS backend process PID $ownerPid. Stopping it before service start..."
+      try {
+        Stop-Process -Id $ownerPid -Force -ErrorAction Stop
+      }
+      catch {
+        throw "Could not stop stale VMS process PID $ownerPid on port $Port. $($_.Exception.Message)"
+      }
+    }
+    else {
+      throw "Port $Port is already in use by process '$procName' (PID $ownerPid). Stop that process and rerun installer."
+    }
+  }
+
+  Start-Sleep -Seconds 2
+  $remaining = Resolve-ListeningPids $Port
+  if ($remaining -and $remaining.Count -gt 0) {
+    throw "Port $Port is still in use after cleanup attempt (PID(s): $($remaining -join ', ')). Stop those processes and rerun installer."
+  }
 }
 
 function Invoke-JsonPost([string]$Uri, $Payload, $Headers = @{}) {
@@ -301,8 +472,8 @@ if ($DataDrive.Length -eq 1) {
 if ($DataDrive -notmatch '^[A-Za-z]:$') {
   throw 'DataDrive must be a drive letter such as V: or D:'
 }
-if ($ServiceName -notmatch '^[A-Za-z0-9_-]+$') {
-  throw "ServiceName '$ServiceName' is invalid. Use only letters, numbers, underscore, or dash (example: VMSCarroll or VMS_Carroll)."
+if ($ServiceName -notmatch '^[A-Za-z0-9_.-]+$') {
+  throw "ServiceName '$ServiceName' is invalid. Use only letters, numbers, period, underscore, or dash (example: VMSCameraServer, vmscameraserver.exe, or VMS_CameraServer)."
 }
 
 $logicalDisk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$DataDrive'" -ErrorAction SilentlyContinue
@@ -334,6 +505,14 @@ Write-Info "Data root: $dataRoot"
 Ensure-Command node 'Install Node.js 22 LTS and retry.'
 Ensure-Command npm 'Install npm (comes with Node.js) and retry.'
 Ensure-Command ffmpeg 'Install FFmpeg and ensure ffmpeg.exe is in PATH.'
+
+$ffmpegPath = Resolve-CommandPath 'ffmpeg'
+if ([string]::IsNullOrWhiteSpace($ffmpegPath) -or -not (Test-Path $ffmpegPath)) {
+  throw "Could not resolve ffmpeg executable path from PATH. Ensure ffmpeg.exe is installed and accessible."
+}
+
+$ffmpegPathEnv = $ffmpegPath -replace '\\', '/'
+Write-Info "Detected FFmpeg executable: $ffmpegPath"
 
 Write-Info 'Copying package files...'
 New-Item -Path $InstallDir -ItemType Directory -Force | Out-Null
@@ -384,6 +563,7 @@ $replacements = @{
   '^NODE_ENV=.*$' = 'NODE_ENV=production'
   '^PORT=.*$' = 'PORT=3001'
   '^CORS_ORIGINS=.*$' = 'CORS_ORIGINS=http://localhost:3001'
+  '^FFMPEG_PATH=.*$' = "FFMPEG_PATH=$ffmpegPathEnv"
   '^DB_PATH=.*$' = "DB_PATH=$dbPathEnv"
   '^RECORDINGS_DIR=.*$' = "RECORDINGS_DIR=$recordingsPathEnv"
   '^STREAMS_DIR=.*$' = "STREAMS_DIR=$streamsPathEnv"
@@ -393,6 +573,10 @@ $replacements = @{
 
 foreach ($pattern in $replacements.Keys) {
   $envContent = [regex]::Replace($envContent, $pattern, $replacements[$pattern], [System.Text.RegularExpressions.RegexOptions]::Multiline)
+}
+
+if ($envContent -notmatch '(?m)^FFMPEG_PATH=') {
+  $envContent = $envContent.TrimEnd("`r", "`n") + "`r`nFFMPEG_PATH=$ffmpegPathEnv`r`n"
 }
 
 $rootEnvPath = Join-Path $InstallDir '.env'
@@ -430,73 +614,54 @@ if (-not (Get-NetFirewallRule -DisplayName 'VMS TCP 3001' -ErrorAction SilentlyC
 $launcherPath = Join-Path $InstallDir 'run-vms-server.cmd'
 $backendLogDir = Join-Path $InstallDir 'backend\logs'
 $backendLogPath = Join-Path $backendLogDir 'server.log'
-$startupTaskName = "${ServiceName}-Startup"
 $launcherContent = "@echo off`r`nsetlocal`r`nif not exist `"%~dp0backend\logs`" mkdir `"%~dp0backend\logs`"`r`ncd /d `"%~dp0backend`"`r`nnode server.js >> `"%~dp0backend\logs\server.log`" 2>&1`r`n"
 Set-Content -Path $launcherPath -Value $launcherContent -Encoding ASCII
 
-$backendStartedOutsideService = $false
+$serviceInstallerPath = Join-Path $InstallDir 'installer\windows\install-vms-service.js'
+
+$backendStartedViaService = $false
 
 if (-not $SkipService) {
   Write-Info "Configuring Windows service: $ServiceName"
 
   if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
-    Write-Warn "Service $ServiceName already exists. Replacing it..."
-    try { & sc.exe stop $ServiceName | Out-Null } catch {}
-    Start-Sleep -Seconds 2
+    Write-Warn "Service $ServiceName already exists. Removing it so the installer can replace it..."
+    Stop-ServiceRobust -ServiceName $ServiceName -TimeoutSec 60
     & sc.exe delete $ServiceName | Out-Null
     Start-Sleep -Seconds 2
   }
 
-  $binPath = "cmd.exe /c `"$launcherPath`""
-  $createOutput = & sc.exe create $ServiceName 'binPath=' $binPath 'start=' 'auto' 'DisplayName=' 'VMS Camera Server' 2>&1
-  if ($LASTEXITCODE -ne 0) {
-    throw "Failed to create Windows service '$ServiceName'. sc.exe output: $($createOutput -join ' | ')"
+  $startupTaskName = "${ServiceName}-Startup"
+  if (Get-ScheduledTask -TaskName $startupTaskName -ErrorAction SilentlyContinue) {
+    Write-Warn "Removing legacy startup task: $startupTaskName"
+    try { Unregister-ScheduledTask -TaskName $startupTaskName -Confirm:$false } catch {}
   }
 
-  $descriptionOutput = & sc.exe description $ServiceName 'VMS Camera Server backend service' 2>&1
-  if ($LASTEXITCODE -ne 0) {
-    throw "Failed to set description for service '$ServiceName'. sc.exe output: $($descriptionOutput -join ' | ')"
-  }
+  Stop-VmsPortConflicts -Port 3001 -InstallPath $InstallDir
 
-  Start-Sleep -Seconds 1
+  try {
+    $serviceArgs = @(
+      '--installDir', $InstallDir,
+      '--backendDir', (Join-Path $InstallDir 'backend'),
+      '--serviceName', $ServiceName,
+      '--serviceDescription', 'VMS Camera Server backend service'
+    )
 
-  $startOutput = & sc.exe start $ServiceName 2>&1
-  if ($LASTEXITCODE -ne 0) {
-    $startText = $startOutput -join ' | '
-    if ($startText -match 'FAILED 1053') {
-      Write-Warn "Service start returned 1053 for '$ServiceName'. Falling back to direct backend start for provisioning."
-
-      try {
-        $taskAction = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c `"$launcherPath`""
-        $taskTrigger = New-ScheduledTaskTrigger -AtStartup
-        $taskPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-        Register-ScheduledTask -TaskName $startupTaskName -Action $taskAction -Trigger $taskTrigger -Principal $taskPrincipal -Force | Out-Null
-        Write-Ok "Registered startup task for reboot auto-start: $startupTaskName"
-      }
-      catch {
-        Write-Warn "Could not register startup task '$startupTaskName': $($_.Exception.Message)"
-      }
-
-      Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', $launcherPath) -WorkingDirectory $InstallDir -WindowStyle Hidden | Out-Null
-      Start-Sleep -Seconds 3
-      $backendStartedOutsideService = $true
-    } else {
-      throw "Failed to start service '$ServiceName'. sc.exe output: $startText. Check backend log at $backendLogPath"
-    }
-  }
-
-  if (-not $backendStartedOutsideService) {
-    Start-Sleep -Seconds 3
-    $serviceState = (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)
-    if (-not $serviceState -or $serviceState.Status -ne 'Running') {
-      $stateLabel = if ($serviceState) { [string]$serviceState.Status } else { 'NotFound' }
-      throw "Service $ServiceName is not running after start (state: $stateLabel). Check backend log at $backendLogPath"
+    $serviceProcess = Start-Process -FilePath 'node' -ArgumentList (@($serviceInstallerPath) + $serviceArgs) -WorkingDirectory $InstallDir -Wait -PassThru -NoNewWindow
+    if ($serviceProcess.ExitCode -ne 0) {
+      throw "Service installer failed with exit code $($serviceProcess.ExitCode). Check backend log at $backendLogPath"
     }
 
-    Write-Ok "Service started: $ServiceName"
-  } else {
-    Write-Warn "Backend started outside Windows service for provisioning only. Review service configuration after install."
+    Write-Ok "Registered Windows service: $ServiceName"
   }
+  catch {
+    throw "Failed to install service '$ServiceName'. $($_.Exception.Message)"
+  }
+
+  Start-ServiceRobust -ServiceName $ServiceName -TimeoutSec 60
+
+  $backendStartedViaService = $true
+  Write-Ok "Service started: $ServiceName"
 } else {
   Write-Warn 'SkipService was set. Service creation skipped.'
 }
@@ -509,7 +674,7 @@ $provisionedCredentialsPath = ''
 if ($ConfigureNow) {
   Write-Info 'Waiting for backend health before provisioning...'
   if (-not (Wait-ForHealth $baseUrl 120)) {
-    if (-not $SkipService -and -not $backendStartedOutsideService) {
+    if (-not $SkipService -and -not $backendStartedViaService) {
       $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
       if ($svc) {
         Write-Warn "Service state at health timeout: $($svc.Status)"
@@ -627,9 +792,9 @@ if ($provisioningRan) {
   Write-Host "Desktop onboarding package: $InstallDir\\client-onboarding" -ForegroundColor Yellow
   Write-Host 'Copy that folder to user devices and run INSTALL-VMS-CLIENT.cmd there.' -ForegroundColor Yellow
 
-  if ($backendStartedOutsideService) {
-    Write-Host "Startup fallback task: $startupTaskName" -ForegroundColor Yellow
-    Write-Host 'This task starts backend automatically at reboot because Windows service start returned 1053.' -ForegroundColor Yellow
+  if ($backendStartedViaService) {
+    Write-Host "Windows service: $ServiceName" -ForegroundColor Yellow
+    Write-Host 'The backend starts automatically at reboot as a real Windows service.' -ForegroundColor Yellow
   }
 } else {
   Write-Host 'Next step: open http://localhost:3001/login and complete provisioning manually if needed.' -ForegroundColor Yellow
