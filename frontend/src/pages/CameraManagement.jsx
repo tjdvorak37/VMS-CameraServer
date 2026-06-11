@@ -496,7 +496,7 @@ function DiscoverModal({ onAdd, onAddBatch, onClose }) {
                     <div>
                       <div className="text-sm font-medium text-slate-200">{d.manufacturer} {d.model}</div>
                       <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                        <span className="text-xs text-slate-500 font-mono">{d.ip} • {d.protocol}</span>
+                        <span className="text-xs text-slate-500 font-mono">{d.ip} | {d.protocol}</span>
                         <span className="badge-info">{d.camera_style || 'Standard IP'}</span>
                         <span className="badge bg-surface-500 text-slate-300">{d.device_type || 'IP Camera'}</span>
                         <span className={d.is_avigilon_like ? 'badge-online' : 'badge bg-surface-500 text-slate-400'}>

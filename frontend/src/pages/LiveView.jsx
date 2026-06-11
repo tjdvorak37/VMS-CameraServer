@@ -95,7 +95,7 @@ export default function LiveView() {
       <div className="flex-shrink-0 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-sm text-slate-400">{cameras.length} camera{cameras.length !== 1 ? 's' : ''}</span>
-          <span className="text-slate-600">•</span>
+           <span className="text-slate-600">|</span>
           <span className="text-sm text-success font-medium">
             {cameras.filter(c => c.status === 'online').length} online
           </span>
@@ -147,25 +147,21 @@ export default function LiveView() {
           }}
         >
           {visibleCameras.map(camera => (
-            <div key={camera.id} className="relative group" onDoubleClick={() => setSelected(camera.id)}>
-              <VideoPlayer
-                src={camera.status === 'online' ? streamUrl(camera) : null}
-                cameraName={camera.name}
-                cameraRotation={camera.rotation}
-                onRotate={() => rotateCamera(camera)}
-                rotateDisabled={!isOperator}
-                rotateTitle={isOperator ? 'Rotate camera' : 'Rotate requires operator or admin role'}
-                showControls
-              />
-              {/* Camera info bar */}
-              <div className="absolute bottom-0 left-0 right-0 
-                              bg-gradient-to-t from-black/70 to-transparent 
-                              px-2 pb-1.5 pt-4
-                              opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-slate-300">{camera.location || 'No location'}</span>
-                  <span className="text-slate-400">{camera.resolution}</span>
-                </div>
+            <div key={camera.id} className="flex flex-col gap-1" onDoubleClick={() => setSelected(camera.id)}>
+              <div className="relative group">
+                <VideoPlayer
+                  src={camera.status === 'online' ? streamUrl(camera) : null}
+                  cameraName={camera.name}
+                  cameraRotation={camera.rotation}
+                  onRotate={() => rotateCamera(camera)}
+                  rotateDisabled={!isOperator}
+                  rotateTitle={isOperator ? 'Rotate camera' : 'Rotate requires operator or admin role'}
+                  showControls
+                />
+              </div>
+              <div className="flex items-center justify-between px-1 text-xs text-slate-400">
+                <span className="truncate pr-2">{camera.location || 'No location'}</span>
+                <span className="flex-shrink-0">{camera.resolution}</span>
               </div>
             </div>
           ))}
@@ -211,7 +207,7 @@ export default function LiveView() {
       )}
 
       <p className="text-xs text-slate-600 text-center">
-        Double-click a camera to expand it • {cameras.length} total cameras
+         Double-click a camera to expand it | {cameras.length} total cameras
       </p>
     </div>
   )

@@ -102,6 +102,22 @@ export default function VideoPlayer({
 
   return (
     <div className={`camera-cell group ${className}`}>
+      {typeof onRotate === 'function' && (
+        <button
+          onClick={onRotate}
+          disabled={rotateDisabled}
+          className={`absolute top-2 right-2 z-30 inline-flex items-center justify-center rounded-lg px-2 py-1 text-xs backdrop-blur-sm transition-colors ${
+            rotateDisabled
+              ? 'bg-black/40 text-white/30 cursor-not-allowed'
+              : 'bg-black/55 text-white/80 hover:text-white hover:bg-black/75'
+          }`}
+          title={rotateTitle}
+          aria-label={rotateTitle}
+        >
+          <RotateCw size={14} />
+        </button>
+      )}
+
       <video
         ref={videoRef}
         muted={state.muted}
@@ -151,7 +167,7 @@ export default function VideoPlayer({
       {showControls && (
         <div className="absolute bottom-0 left-0 right-0 z-20 flex items-center justify-end gap-1
              bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5
-             opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-200">
+             opacity-100 transition-opacity duration-200">
           <button
             onClick={toggleMute}
             className="p-1 text-white/70 hover:text-white transition-colors"
