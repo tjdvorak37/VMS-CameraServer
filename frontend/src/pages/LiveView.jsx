@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Grid, Layout, Maximize2, RefreshCw, Camera as CameraIcon } from 'lucide-react'
+import { Grid, Layout, Maximize2, RefreshCw, Camera as CameraIcon, RotateCw } from 'lucide-react'
 import VideoPlayer from '../components/VideoPlayer'
 import { cameraApi } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
@@ -159,9 +159,23 @@ export default function LiveView() {
                   showControls
                 />
               </div>
-              <div className="flex items-center justify-between px-1 text-xs text-slate-400">
+              <div className="flex items-center justify-between gap-2 px-1 text-xs text-slate-400">
                 <span className="truncate pr-2">{camera.location || 'No location'}</span>
-                <span className="flex-shrink-0">{camera.resolution}</span>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span>{String(camera.resolution || '').replace('×', 'x')}</span>
+                  {isOperator && (
+                    <button
+                      type="button"
+                      onClick={() => rotateCamera(camera)}
+                      className="inline-flex items-center gap-1 rounded-md border border-slate-600/80 bg-surface-800/80 px-2 py-0.5 text-[11px] text-slate-300 hover:border-accent hover:text-accent transition-colors"
+                      title="Rotate camera"
+                      aria-label="Rotate camera"
+                    >
+                      <RotateCw size={12} />
+                      Rotate
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}
