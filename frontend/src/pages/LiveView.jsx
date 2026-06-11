@@ -150,7 +150,7 @@ export default function LiveView() {
             <div key={camera.id} className="flex flex-col gap-1" onDoubleClick={() => setSelected(camera.id)}>
               <div className="relative group">
                 <VideoPlayer
-                  src={camera.status === 'online' ? streamUrl(camera) : null}
+                  src={streamUrl(camera)}
                   cameraName={camera.name}
                   cameraRotation={camera.rotation}
                   onRotate={() => rotateCamera(camera)}
