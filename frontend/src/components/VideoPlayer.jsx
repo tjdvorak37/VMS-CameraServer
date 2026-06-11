@@ -129,7 +129,7 @@ export default function VideoPlayer({
 
       {/* Loading overlay */}
       {state.status === 'loading' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60">
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/60">
           <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin mb-2" />
           <span className="text-xs text-slate-400">Connecting...</span>
         </div>
@@ -137,7 +137,7 @@ export default function VideoPlayer({
 
       {/* Error overlay */}
       {state.status === 'error' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80">
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/80">
           <WifiOff size={28} className="text-slate-500 mb-2" />
           <span className="text-xs text-slate-400">{state.error || 'Stream offline'}</span>
           <button
@@ -151,7 +151,7 @@ export default function VideoPlayer({
       )}
 
       {/* Camera name overlay */}
-      <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between 
+      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between 
                bg-gradient-to-b from-black/60 to-transparent px-2 py-1.5
                opacity-0 group-hover:opacity-100 transition-opacity duration-200">
         <div className="flex items-center gap-1.5">
