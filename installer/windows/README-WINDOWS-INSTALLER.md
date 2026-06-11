@@ -48,6 +48,8 @@ Or launch a branded GUI menu:
 
 `installer\windows\vms-setup-launcher.cmd`
 
+From that same menu, use `Switch To Docker Deployment` to launch the Docker cutover flow without typing commands.
+
 Guided mode prompts for the data drive, and scripted runs can override it with `-DataDrive`.
 
 For a Windows 11 mouse-first walkthrough using the packaged installer bundle, see `README-WINDOWS-11-GUI-SETUP.md`.
@@ -196,3 +198,35 @@ installer\windows\configure-vms-discovery.cmd -InstallDir "V:\VMS-CameraServer" 
 ```
 
 This script updates both `V:\VMS-CameraServer\.env` and `V:\VMS-CameraServer\backend\.env`, restarts the configured service name (for example `VMSCameraServer` or `vmscameraserver.exe`), checks health at `http://localhost:3001/api/health`, and can test camera reachability on ports `554`, `80`, and `3702`.
+
+## Docker-first cutover on Windows (recommended for update stability)
+
+If your machine has a mixed/legacy setup (manual Node + service + Docker), switch to one consistent deployment model:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File installer\windows\switch-vms-to-docker.ps1 `
+	-InstallDir "V:\VMS-CameraServer" `
+	-DataRoot "V:\VMSData" `
+	-PublicPort 8080
+```
+
+CMD launcher:
+
+```cmd
+installer\windows\switch-vms-to-docker.cmd
+```
+
+You can also start the same flow from the GUI menu with `Switch To Docker Deployment`.
+
+The cutover script:
+- Removes old Windows service installs (`VMSCameraServer`, `vmscameraserver.exe`) and startup task.
+- Stops stale backend `node.exe` processes.
+- Configures `.env` with Docker runtime values, including `VMS_DATA_ROOT`.
+- Rebuilds frontend assets for nginx.
+- Recreates Docker stack cleanly (`docker compose down --remove-orphans`, then `up -d --build`).
+
+Optional old-path archive cleanup:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File installer\windows\switch-vms-to-docker.ps1 -RemoveLegacyInstall
+```

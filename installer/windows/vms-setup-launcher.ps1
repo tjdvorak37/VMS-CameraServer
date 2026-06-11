@@ -136,17 +136,29 @@ $btnMigrate.Add_Click({
 })
 $form.Controls.Add($btnMigrate)
 
+$btnDockerCutover = New-Object System.Windows.Forms.Button
+$btnDockerCutover.Text = 'Switch To Docker Deployment'
+$btnDockerCutover.Size = New-Object System.Drawing.Size(560, 52)
+$btnDockerCutover.Location = New-Object System.Drawing.Point(32, 366)
+$btnDockerCutover.BackColor = [System.Drawing.Color]::FromArgb(30, 41, 59)
+$btnDockerCutover.ForeColor = [System.Drawing.Color]::White
+$btnDockerCutover.FlatStyle = 'Flat'
+$btnDockerCutover.Add_Click({
+  Start-VmsInstaller -ScriptName 'switch-vms-to-docker.cmd' -RequireElevation
+})
+$form.Controls.Add($btnDockerCutover)
+
 $footer = New-Object System.Windows.Forms.Label
-$footer.Text = 'Tip: Use Migrate when replacing an older C: install with the V: layout.'
+$footer.Text = 'Tip: Use Migrate for C: to V: cutovers, or Switch To Docker to standardize the stack.'
 $footer.Font = New-Object System.Drawing.Font('Segoe UI', 9)
 $footer.AutoSize = $true
-$footer.Location = New-Object System.Drawing.Point(32, 376)
+$footer.Location = New-Object System.Drawing.Point(32, 430)
 $form.Controls.Add($footer)
 
 $btnExit = New-Object System.Windows.Forms.Button
 $btnExit.Text = 'Close'
 $btnExit.Size = New-Object System.Drawing.Size(120, 36)
-$btnExit.Location = New-Object System.Drawing.Point(472, 408)
+$btnExit.Location = New-Object System.Drawing.Point(472, 462)
 $btnExit.BackColor = [System.Drawing.Color]::FromArgb(51, 65, 85)
 $btnExit.ForeColor = [System.Drawing.Color]::White
 $btnExit.FlatStyle = 'Flat'
