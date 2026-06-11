@@ -108,7 +108,7 @@ export default function Login() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-accent/20 border border-accent/30 mb-4">
             <Shield size={32} className="text-accent" />
           </div>
-          <h1 className="text-3xl font-bold text-slate-100">VMS Pro</h1>
+          <h1 className="text-3xl font-bold text-slate-100">VMS Camera Server</h1>
           <p className="text-slate-400 mt-1">Video Management System</p>
         </div>
 
@@ -207,7 +207,7 @@ export default function Login() {
         </div>
 
         <p className="text-center text-xs text-slate-600 mt-6">
-          VMS Pro — Professional Video Management System © 2026
+          VMS Camera Server — Professional Video Management System © 2026
         </p>
       </div>
 

@@ -37,7 +37,7 @@ export default function Sidebar() {
             <Shield size={16} className="text-white" />
           </div>
           <div>
-            <div className="font-bold text-slate-100 text-sm leading-tight">VMS Pro</div>
+            <div className="font-bold text-slate-100 text-sm leading-tight">VMS Camera Server</div>
             <div className="text-xs text-slate-500">Video Management</div>
           </div>
         </div>
