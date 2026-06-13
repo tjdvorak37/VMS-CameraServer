@@ -14,6 +14,7 @@ const activeStreams = new Map();
 const intentionallyStopped = new Set();
 const pendingRestartTimers = new Map();
 const restartBackoffMs = new Map();
+const cameraRtspTransportOverride = new Map();
 const STREAM_MONITOR_INTERVAL_MS = 5000;
 const STREAM_STALE_AFTER_MS = Number(process.env.STREAM_STALE_AFTER_MS) > 0
   ? Number(process.env.STREAM_STALE_AFTER_MS)
@@ -26,6 +27,21 @@ const STREAM_PLAYLIST_FRESH_MS = Number(process.env.STREAM_PLAYLIST_FRESH_MS) > 
   : 30000;
 const MIN_RESTART_DELAY_MS = 3000;
 const MAX_RESTART_DELAY_MS = 30000;
+
+function getDefaultRtspTransport() {
+  const raw = String(process.env.RTSP_TRANSPORT || 'tcp').trim().toLowerCase();
+  return raw === 'udp' ? 'udp' : 'tcp';
+}
+
+function getCameraRtspTransport(cameraId) {
+  return cameraRtspTransportOverride.get(Number(cameraId)) || getDefaultRtspTransport();
+}
+
+function setCameraRtspTransport(cameraId, transport) {
+  const normalized = String(transport || '').trim().toLowerCase();
+  const safeTransport = normalized === 'udp' ? 'udp' : 'tcp';
+  cameraRtspTransportOverride.set(Number(cameraId), safeTransport);
+}
 
 function resolveFfmpegBin() {
   const candidates = [
@@ -127,6 +143,54 @@ function buildRtspUrl(camera) {
   }
 }
 
+function runRtspProbe(camera, transport, timeoutMs) {
+  const ffmpegBin = resolveFfmpegBin();
+  const args = [
+    '-rtsp_transport', transport,
+    '-loglevel', 'error',
+    '-i', buildRtspUrl(camera),
+    '-t', '3',
+    '-f', 'null',
+    '-',
+  ];
+
+  return new Promise((resolve) => {
+    let timedOut = false;
+    const lines = [];
+
+    const proc = spawn(ffmpegBin, args, {
+      detached: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    proc.stderr.on('data', (data) => {
+      const chunkLines = data.toString().split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+      chunkLines.forEach((line) => {
+        lines.push(line);
+        if (lines.length > 30) lines.shift();
+      });
+    });
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        proc.kill('SIGTERM');
+      } catch (_) {}
+    }, timeoutMs);
+
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      resolve({ ok: false, timedOut: false, code: -1, detail: err.message });
+    });
+
+    proc.on('exit', (code) => {
+      clearTimeout(timer);
+      const detail = lines.slice(-6).join(' | ') || 'Unknown RTSP probe error';
+      resolve({ ok: !timedOut && code === 0, timedOut, code, detail });
+    });
+  });
+}
+
 /**
  * Ensure the stream directory exists for a camera.
  */
@@ -143,6 +207,7 @@ function startStream(camera) {
   const id = camera.id;
   intentionallyStopped.delete(id);
   clearPendingRestart(id);
+  const transport = getCameraRtspTransport(id);
 
   if (activeStreams.has(id)) {
     stopStream(id);
@@ -154,7 +219,7 @@ function startStream(camera) {
   const segmentPath = path.join(streamDir, 'seg%d.ts');
 
   const args = [
-    '-rtsp_transport', 'tcp',
+    '-rtsp_transport', transport,
     '-i', buildRtspUrl(camera),
   ];
 
@@ -179,7 +244,7 @@ function startStream(camera) {
 
   const ffmpegBin = resolveFfmpegBin();
 
-  console.log(`[StreamManager] Starting stream for camera ${id} (${camera.name}) using ${ffmpegBin}`);
+  console.log(`[StreamManager] Starting stream for camera ${id} (${camera.name}) using ${ffmpegBin} (rtsp_transport=${transport})`);
 
   const proc = spawn(ffmpegBin, args, {
     detached: false,
@@ -219,6 +284,13 @@ function startStream(camera) {
 
     if (wasIntentional) return;
 
+    // If startup fails before ever becoming healthy on TCP, retry with UDP.
+    if (existingEntry && !existingEntry.lastHealthyAt && transport === 'tcp') {
+      setCameraRtspTransport(id, 'udp');
+      scheduleRestart(id, `ffmpeg_exit_${code}_fallback_udp`);
+      return;
+    }
+
     // Restart after delay for any unintentional exit, including clean exits.
     // Some cameras close RTSP sessions periodically and FFmpeg exits with code 0.
     if (recentFfmpegLines.length > 0) {
@@ -242,6 +314,7 @@ function startStream(camera) {
     process: proc,
     status: 'starting',
     startedAt: new Date().toISOString(),
+    transport,
     cameraId: id,
     healthCheckTimer: null,
     monitorTimer: null,
@@ -259,6 +332,7 @@ function startStream(camera) {
 
     if (isStreamHealthy(id)) {
       entry.status = 'streaming';
+      setCameraRtspTransport(id, transport);
       entry.lastHealthyAt = Date.now();
       restartBackoffMs.set(id, MIN_RESTART_DELAY_MS);
       clearInterval(healthCheckTimer);
@@ -357,7 +431,7 @@ function captureSnapshot(camera) {
     const snapshotFile = path.join(snapshotDir, `snap_${Date.now()}.jpg`);
 
     const args = [
-      '-rtsp_transport', 'tcp',
+      '-rtsp_transport', getCameraRtspTransport(camera.id),
       '-i', buildRtspUrl(camera),
       '-vframes', '1',
       '-q:v', '2',
@@ -389,105 +463,77 @@ function captureSnapshot(camera) {
 function testRtspConnection(camera, options = {}) {
   const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 12000;
 
-  return new Promise((resolve) => {
-    const ffmpegBin = resolveFfmpegBin();
-    const args = [
-      '-rtsp_transport', 'tcp',
-      '-loglevel', 'error',
-      '-i', buildRtspUrl(camera),
-      '-t', '3',
-      '-f', 'null',
-      '-',
-    ];
+  return new Promise(async (resolve) => {
+    const primaryTransport = getCameraRtspTransport(camera.id);
+    const primary = await runRtspProbe(camera, primaryTransport, timeoutMs);
 
-    let timedOut = false;
-    const lines = [];
-
-    const proc = spawn(ffmpegBin, args, {
-      detached: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    proc.stderr.on('data', (data) => {
-      const chunkLines = data.toString().split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-      chunkLines.forEach((line) => {
-        lines.push(line);
-        if (lines.length > 30) lines.shift();
+    if (primary.ok) {
+      setCameraRtspTransport(camera.id, primaryTransport);
+      return resolve({
+        ok: true,
+        reason: 'ok',
+        message: `RTSP connection successful (${primaryTransport.toUpperCase()})`,
       });
-    });
+    }
 
-    const timer = setTimeout(() => {
-      timedOut = true;
-      try {
-        proc.kill('SIGTERM');
-      } catch (_) {}
-    }, timeoutMs);
+    const alternateTransport = primaryTransport === 'tcp' ? 'udp' : 'tcp';
+    const primaryFailedByTransport =
+      primary.timedOut ||
+      String(primary.detail || '').toLowerCase().includes('timed out') ||
+      String(primary.detail || '').toLowerCase().includes('connection refused') ||
+      String(primary.detail || '').toLowerCase().includes('no route to host');
 
-    proc.on('error', (err) => {
-      clearTimeout(timer);
-      resolve({
-        ok: false,
-        reason: 'spawn_error',
-        message: 'Unable to start FFmpeg probe',
-        detail: err.message,
-      });
-    });
-
-    proc.on('exit', (code) => {
-      clearTimeout(timer);
-
-      if (timedOut) {
-        return resolve({
-          ok: false,
-          reason: 'timeout',
-          message: 'RTSP probe timed out',
-          detail: 'Camera did not respond before timeout',
-        });
-      }
-
-      if (code === 0) {
+    if (primaryFailedByTransport) {
+      const alternate = await runRtspProbe(camera, alternateTransport, timeoutMs);
+      if (alternate.ok) {
+        setCameraRtspTransport(camera.id, alternateTransport);
         return resolve({
           ok: true,
           reason: 'ok',
-          message: 'RTSP connection successful',
+          message: `RTSP connection successful (${alternateTransport.toUpperCase()})`,
+          detail: `Primary transport ${primaryTransport.toUpperCase()} failed and fallback to ${alternateTransport.toUpperCase()} succeeded.`,
         });
       }
+    }
 
-      const detail = lines.slice(-6).join(' | ') || 'Unknown RTSP probe error';
-      const lowered = detail.toLowerCase();
-      let reason = 'unknown';
-      let message = 'RTSP probe failed';
-
-      if (lowered.includes('401') || lowered.includes('unauthorized') || lowered.includes('authentication')) {
-        reason = 'auth_failed';
-        message = 'Authentication failed';
-      } else if (
-        lowered.includes('connection timed out') ||
-        lowered.includes('operation timed out') ||
-        lowered.includes('network is unreachable') ||
-        lowered.includes('no route to host')
-      ) {
-        reason = 'network_unreachable';
-        message = 'Camera network unreachable';
-      } else if (lowered.includes('connection refused')) {
-        reason = 'connection_refused';
-        message = 'RTSP port refused the connection';
-      } else if (
-        lowered.includes('404') ||
-        lowered.includes('not found') ||
-        lowered.includes('method describe failed')
-      ) {
-        reason = 'invalid_path';
-        message = 'RTSP path appears invalid';
-      }
-
+    if (primary.timedOut) {
       return resolve({
         ok: false,
-        reason,
-        message,
-        detail,
+        reason: 'timeout',
+        message: 'RTSP probe timed out',
+        detail: 'Camera did not respond before timeout',
       });
-    });
+    }
+
+    const detail = primary.detail || 'Unknown RTSP probe error';
+    const lowered = detail.toLowerCase();
+    let reason = 'unknown';
+    let message = 'RTSP probe failed';
+
+    if (lowered.includes('401') || lowered.includes('unauthorized') || lowered.includes('authentication')) {
+      reason = 'auth_failed';
+      message = 'Authentication failed';
+    } else if (
+      lowered.includes('connection timed out') ||
+      lowered.includes('operation timed out') ||
+      lowered.includes('network is unreachable') ||
+      lowered.includes('no route to host')
+    ) {
+      reason = 'network_unreachable';
+      message = 'Camera network unreachable';
+    } else if (lowered.includes('connection refused')) {
+      reason = 'connection_refused';
+      message = 'RTSP port refused the connection';
+    } else if (
+      lowered.includes('404') ||
+      lowered.includes('not found') ||
+      lowered.includes('method describe failed')
+    ) {
+      reason = 'invalid_path';
+      message = 'RTSP path appears invalid';
+    }
+
+    return resolve({ ok: false, reason, message, detail });
   });
 }
 
@@ -501,6 +547,7 @@ function getAllStreamStatuses() {
       status: entry.status,
       startedAt: entry.startedAt,
       pid: entry.process ? entry.process.pid : null,
+      transport: entry.transport || getCameraRtspTransport(id),
     };
   });
   return result;
