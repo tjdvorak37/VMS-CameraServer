@@ -171,19 +171,36 @@ function initializeSchema(db) {
 
 function seedDefaultAdmin(db) {
   const bcrypt = require('bcryptjs');
-  const crypto = require('crypto');
-  const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
-  let createdDefaultAdmin = false;
+  const defaultAdminUsername = 'admin';
+  const defaultAdminEmail = 'admin@vms.local';
+  const defaultAdminPassword = process.env.ADMIN_BOOTSTRAP_PASSWORD;
 
-  if (userCount === 0) {
-    const bootstrapPassword = crypto.randomBytes(24).toString('hex');
-    const hash = bcrypt.hashSync(bootstrapPassword, 12);
+  if (!defaultAdminPassword || !defaultAdminPassword.trim()) {
+    throw new Error('ADMIN_BOOTSTRAP_PASSWORD is required');
+  }
+
+  const defaultAdminHash = bcrypt.hashSync(defaultAdminPassword, 12);
+
+  const existingAdmin = db.prepare(
+    'SELECT id FROM users WHERE username = ? ORDER BY id ASC LIMIT 1'
+  ).get(defaultAdminUsername);
+
+  if (existingAdmin) {
     db.prepare(`
-      INSERT INTO users (username, email, password_hash, role)
-      VALUES (?, ?, ?, ?)
-    `).run('admin', 'admin@vms.local', hash, 'admin');
-    createdDefaultAdmin = true;
-    console.log('[DB] Bootstrap admin created for initial setup.');
+      UPDATE users
+      SET role = 'admin',
+          is_active = 1
+      WHERE id = ?
+    `).run(existingAdmin.id);
+
+    console.log('[DB] Default admin ensured and left intact.');
+  } else {
+    db.prepare(`
+      INSERT INTO users (username, email, password_hash, role, is_active, must_change_password)
+      VALUES (?, ?, ?, 'admin', 1, 0)
+    `).run(defaultAdminUsername, defaultAdminEmail, defaultAdminHash);
+
+    console.log('[DB] Default admin created with configured credentials.');
   }
 
   // Default system settings
@@ -204,23 +221,21 @@ function seedDefaultAdmin(db) {
   `);
   defaults.forEach(([k, v]) => upsert.run(k, v));
 
-  if (createdDefaultAdmin) {
-    db.prepare(`
-      INSERT INTO system_settings (key, value, updated_at)
-      VALUES (?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(key) DO UPDATE SET
-        value = excluded.value,
-        updated_at = CURRENT_TIMESTAMP
-    `).run('setup_completed', 'false');
+  db.prepare(`
+    INSERT INTO system_settings (key, value, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET
+      value = excluded.value,
+      updated_at = CURRENT_TIMESTAMP
+  `).run('setup_completed', 'true');
 
-    db.prepare(`
-      INSERT INTO system_settings (key, value, updated_at)
-      VALUES (?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(key) DO UPDATE SET
-        value = excluded.value,
-        updated_at = CURRENT_TIMESTAMP
-    `).run('setup_completed_at', '');
-  }
+  db.prepare(`
+    INSERT INTO system_settings (key, value, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET
+      value = excluded.value,
+      updated_at = CURRENT_TIMESTAMP
+  `).run('setup_completed_at', new Date().toISOString());
 }
 
 module.exports = { getDb };

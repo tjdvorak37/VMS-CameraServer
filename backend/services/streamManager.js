@@ -12,6 +12,20 @@ const { getDb } = require('../config/database');
 // Map of cameraId -> { process, status, startedAt }
 const activeStreams = new Map();
 const intentionallyStopped = new Set();
+const pendingRestartTimers = new Map();
+const restartBackoffMs = new Map();
+const STREAM_MONITOR_INTERVAL_MS = 5000;
+const STREAM_STALE_AFTER_MS = Number(process.env.STREAM_STALE_AFTER_MS) > 0
+  ? Number(process.env.STREAM_STALE_AFTER_MS)
+  : 60000;
+const STREAM_STARTUP_TIMEOUT_MS = Number(process.env.STREAM_STARTUP_TIMEOUT_MS) > 0
+  ? Number(process.env.STREAM_STARTUP_TIMEOUT_MS)
+  : 120000;
+const STREAM_PLAYLIST_FRESH_MS = Number(process.env.STREAM_PLAYLIST_FRESH_MS) > 0
+  ? Number(process.env.STREAM_PLAYLIST_FRESH_MS)
+  : 30000;
+const MIN_RESTART_DELAY_MS = 3000;
+const MAX_RESTART_DELAY_MS = 30000;
 
 function resolveFfmpegBin() {
   const candidates = [
@@ -48,6 +62,35 @@ function clearStreamArtifacts(streamDir) {
   } catch (_) {}
 }
 
+function clearPendingRestart(cameraId) {
+  const timer = pendingRestartTimers.get(cameraId);
+  if (timer) {
+    clearTimeout(timer);
+    pendingRestartTimers.delete(cameraId);
+  }
+}
+
+function scheduleRestart(cameraId, reason) {
+  clearPendingRestart(cameraId);
+
+  const currentBackoff = restartBackoffMs.get(cameraId) || MIN_RESTART_DELAY_MS;
+  const delayMs = Math.min(currentBackoff, MAX_RESTART_DELAY_MS);
+  restartBackoffMs.set(cameraId, Math.min(delayMs * 2, MAX_RESTART_DELAY_MS));
+
+  console.warn(`[StreamManager] Scheduling restart for camera ${cameraId} in ${delayMs}ms (${reason}).`);
+
+  const timer = setTimeout(() => {
+    pendingRestartTimers.delete(cameraId);
+    try {
+      const db = getDb();
+      const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(cameraId);
+      if (cam) startStream(cam);
+    } catch (_) {}
+  }, delayMs);
+
+  pendingRestartTimers.set(cameraId, timer);
+}
+
 function isStreamHealthy(cameraId) {
   try {
     const streamDir = path.join(config.STREAMS_DIR, String(cameraId));
@@ -56,21 +99,16 @@ function isStreamHealthy(cameraId) {
 
     const stats = fs.statSync(m3u8Path);
     const ageMs = Date.now() - stats.mtimeMs;
-    if (ageMs > 12000 || stats.size <= 0) return false;
+    if (ageMs > STREAM_PLAYLIST_FRESH_MS || stats.size <= 0) return false;
 
     const text = fs.readFileSync(m3u8Path, 'utf8');
-    return /\.ts(\?|$)/.test(text);
+
+    // HLS playlists are multi-line; segment entries are usually followed by a newline,
+    // not end-of-string. Treat any non-comment .ts entry as healthy content.
+    return /(?:^|\n)\s*[^#\n]+\.ts(?:\?[^\n]*)?\s*(?:\n|$)/m.test(text);
   } catch (_) {
     return false;
   }
-}
-
-function getRotationFilter(rotation) {
-  const normalized = Number(rotation) || 0;
-  if (normalized === 90) return 'transpose=1';
-  if (normalized === 180) return 'transpose=1,transpose=1';
-  if (normalized === 270) return 'transpose=2';
-  return null;
 }
 
 /**
@@ -104,6 +142,7 @@ function ensureStreamDir(cameraId) {
 function startStream(camera) {
   const id = camera.id;
   intentionallyStopped.delete(id);
+  clearPendingRestart(id);
 
   if (activeStreams.has(id)) {
     stopStream(id);
@@ -119,11 +158,6 @@ function startStream(camera) {
     '-i', buildRtspUrl(camera),
   ];
 
-  const rotationFilter = getRotationFilter(camera.rotation);
-  if (rotationFilter) {
-    args.push('-vf', rotationFilter);
-  }
-
   args.push(
     '-c:v', 'libx264',
     '-preset', 'ultrafast',
@@ -136,6 +170,7 @@ function startStream(camera) {
     '-f', 'hls',
     '-hls_time', String(config.HLS_TIME),
     '-hls_list_size', String(config.HLS_LIST_SIZE),
+    '-hls_delete_threshold', String(config.HLS_DELETE_THRESHOLD || 10),
     '-hls_flags', 'delete_segments+independent_segments+omit_endlist',
     '-hls_segment_filename', segmentPath,
     '-y',
@@ -162,6 +197,15 @@ function startStream(camera) {
 
   proc.on('exit', (code, signal) => {
     console.log(`[StreamManager] Stream for camera ${id} exited (code ${code}, signal ${signal || 'none'})`);
+
+    const existingEntry = activeStreams.get(id);
+    if (existingEntry?.healthCheckTimer) {
+      clearInterval(existingEntry.healthCheckTimer);
+    }
+    if (existingEntry?.monitorTimer) {
+      clearInterval(existingEntry.monitorTimer);
+    }
+
     activeStreams.delete(id);
 
     const wasIntentional = intentionallyStopped.has(id);
@@ -175,23 +219,14 @@ function startStream(camera) {
 
     if (wasIntentional) return;
 
-    // Restart after delay (unless deliberately stopped)
-    const shouldRestart = code !== 0 || Boolean(signal);
-    if (shouldRestart) {
-      if (recentFfmpegLines.length > 0) {
-        const tail = recentFfmpegLines.slice(-8).join('\n');
-        console.error(`[StreamManager] Last FFmpeg output for camera ${id}:\n${tail}`);
-      }
-
-      const restartDelay = 5000;
-      setTimeout(() => {
-        try {
-          const db = getDb();
-          const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(id);
-          if (cam) startStream(cam);
-        } catch (_) {}
-      }, restartDelay);
+    // Restart after delay for any unintentional exit, including clean exits.
+    // Some cameras close RTSP sessions periodically and FFmpeg exits with code 0.
+    if (recentFfmpegLines.length > 0) {
+      const tail = recentFfmpegLines.slice(-8).join('\n');
+      console.error(`[StreamManager] Last FFmpeg output for camera ${id}:\n${tail}`);
     }
+
+    scheduleRestart(id, `ffmpeg_exit_${code}`);
   });
 
   proc.on('error', (err) => {
@@ -209,6 +244,8 @@ function startStream(camera) {
     startedAt: new Date().toISOString(),
     cameraId: id,
     healthCheckTimer: null,
+    monitorTimer: null,
+    lastHealthyAt: null,
   });
 
   // Only mark stream healthy once HLS playlist and segments are actually generated.
@@ -222,6 +259,8 @@ function startStream(camera) {
 
     if (isStreamHealthy(id)) {
       entry.status = 'streaming';
+      entry.lastHealthyAt = Date.now();
+      restartBackoffMs.set(id, MIN_RESTART_DELAY_MS);
       clearInterval(healthCheckTimer);
       try {
         const db = getDb();
@@ -232,7 +271,7 @@ function startStream(camera) {
       return;
     }
 
-    if (Date.now() - startedAt > 20000) {
+    if (Date.now() - startedAt > STREAM_STARTUP_TIMEOUT_MS) {
       clearInterval(healthCheckTimer);
       entry.status = 'error';
       try {
@@ -242,6 +281,41 @@ function startStream(camera) {
   }, 1000);
 
   activeStreams.get(id).healthCheckTimer = healthCheckTimer;
+
+  const monitorTimer = setInterval(() => {
+    const entry = activeStreams.get(id);
+    if (!entry || entry.process !== proc) {
+      clearInterval(monitorTimer);
+      return;
+    }
+
+    // Initial startup is handled by healthCheckTimer (45s timeout).
+    // Avoid killing FFmpeg early before first healthy playlist appears.
+    if (!entry.lastHealthyAt) {
+      return;
+    }
+
+    if (isStreamHealthy(id)) {
+      entry.lastHealthyAt = Date.now();
+      if (entry.status !== 'streaming') {
+        entry.status = 'streaming';
+      }
+      return;
+    }
+
+    const sinceHealthyMs = Date.now() - (entry.lastHealthyAt || startedAt);
+    if (sinceHealthyMs > STREAM_STALE_AFTER_MS) {
+      entry.status = 'error';
+      console.warn(
+        `[StreamManager] Stream for camera ${id} is stale for ${sinceHealthyMs}ms, restarting process.`
+      );
+      try {
+        proc.kill('SIGTERM');
+      } catch (_) {}
+    }
+  }, STREAM_MONITOR_INTERVAL_MS);
+
+  activeStreams.get(id).monitorTimer = monitorTimer;
 }
 
 /**
@@ -249,11 +323,16 @@ function startStream(camera) {
  */
 function stopStream(cameraId) {
   const id = parseInt(cameraId);
+  clearPendingRestart(id);
+  restartBackoffMs.delete(id);
   const entry = activeStreams.get(id);
   if (entry && entry.process) {
     intentionallyStopped.add(id);
     if (entry.healthCheckTimer) {
       clearInterval(entry.healthCheckTimer);
+    }
+    if (entry.monitorTimer) {
+      clearInterval(entry.monitorTimer);
     }
     try {
       entry.process.kill('SIGTERM');
@@ -305,6 +384,114 @@ function captureSnapshot(camera) {
 }
 
 /**
+ * Probe camera RTSP connectivity and return a diagnostic result.
+ */
+function testRtspConnection(camera, options = {}) {
+  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 12000;
+
+  return new Promise((resolve) => {
+    const ffmpegBin = resolveFfmpegBin();
+    const args = [
+      '-rtsp_transport', 'tcp',
+      '-loglevel', 'error',
+      '-i', buildRtspUrl(camera),
+      '-t', '3',
+      '-f', 'null',
+      '-',
+    ];
+
+    let timedOut = false;
+    const lines = [];
+
+    const proc = spawn(ffmpegBin, args, {
+      detached: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    proc.stderr.on('data', (data) => {
+      const chunkLines = data.toString().split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+      chunkLines.forEach((line) => {
+        lines.push(line);
+        if (lines.length > 30) lines.shift();
+      });
+    });
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        proc.kill('SIGTERM');
+      } catch (_) {}
+    }, timeoutMs);
+
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      resolve({
+        ok: false,
+        reason: 'spawn_error',
+        message: 'Unable to start FFmpeg probe',
+        detail: err.message,
+      });
+    });
+
+    proc.on('exit', (code) => {
+      clearTimeout(timer);
+
+      if (timedOut) {
+        return resolve({
+          ok: false,
+          reason: 'timeout',
+          message: 'RTSP probe timed out',
+          detail: 'Camera did not respond before timeout',
+        });
+      }
+
+      if (code === 0) {
+        return resolve({
+          ok: true,
+          reason: 'ok',
+          message: 'RTSP connection successful',
+        });
+      }
+
+      const detail = lines.slice(-6).join(' | ') || 'Unknown RTSP probe error';
+      const lowered = detail.toLowerCase();
+      let reason = 'unknown';
+      let message = 'RTSP probe failed';
+
+      if (lowered.includes('401') || lowered.includes('unauthorized') || lowered.includes('authentication')) {
+        reason = 'auth_failed';
+        message = 'Authentication failed';
+      } else if (
+        lowered.includes('connection timed out') ||
+        lowered.includes('operation timed out') ||
+        lowered.includes('network is unreachable') ||
+        lowered.includes('no route to host')
+      ) {
+        reason = 'network_unreachable';
+        message = 'Camera network unreachable';
+      } else if (lowered.includes('connection refused')) {
+        reason = 'connection_refused';
+        message = 'RTSP port refused the connection';
+      } else if (
+        lowered.includes('404') ||
+        lowered.includes('not found') ||
+        lowered.includes('method describe failed')
+      ) {
+        reason = 'invalid_path';
+        message = 'RTSP path appears invalid';
+      }
+
+      return resolve({
+        ok: false,
+        reason,
+        message,
+        detail,
+      });
+    });
+  });
+}
+
+/**
  * Return status of all active streams.
  */
 function getAllStreamStatuses() {
@@ -339,6 +526,7 @@ module.exports = {
   startStream,
   stopStream,
   captureSnapshot,
+  testRtspConnection,
   getAllStreamStatuses,
   initializeStreams,
 };

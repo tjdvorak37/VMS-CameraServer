@@ -11,6 +11,7 @@ const { getDb } = require('../config/database');
 
 // Map of cameraId -> { process, currentFile, startedAt }
 const activeRecordings = new Map();
+const intentionallyStopped = new Set();
 
 function resolveFfmpegBin() {
   const candidates = [
@@ -74,6 +75,7 @@ function formatTimestamp(date = new Date()) {
  */
 function startRecording(camera) {
   const id = camera.id;
+  intentionallyStopped.delete(id);
 
   if (activeRecordings.has(id)) {
     stopRecording(id);
@@ -144,8 +146,12 @@ function startRecording(camera) {
       db.prepare('UPDATE cameras SET record_pid = NULL WHERE id = ?').run(id);
     } catch (_) {}
 
-    // Auto-restart if unexpected exit
-    if (code !== null && code !== 0) {
+    const wasIntentional = intentionallyStopped.has(id);
+    intentionallyStopped.delete(id);
+
+    // Auto-restart on any unexpected exit (including code 0)
+    // because some cameras/RTSP servers terminate sessions periodically.
+    if (!wasIntentional) {
       setTimeout(() => {
         try {
           const db = getDb();
@@ -209,6 +215,7 @@ function stopRecording(cameraId) {
   const id = parseInt(cameraId);
   const entry = activeRecordings.get(id);
   if (entry && entry.process) {
+    intentionallyStopped.add(id);
     try { entry.process.kill('SIGTERM'); } catch (_) {}
     activeRecordings.delete(id);
   }

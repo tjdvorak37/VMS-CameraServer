@@ -61,15 +61,17 @@ chmod +x setup.sh && ./setup.sh
 npm run dev
 ```
 
-This starts both backend (port **3001**) and frontend dev server (port **5173**) concurrently.
+This starts the Docker stack, with nginx on port **8080** and the backend on port **3001**.
 
-Open **http://localhost:5173** in your browser.
+Open **http://localhost:8080** in your browser.
+
+If you want the old local Vite/nodemon workflow, use `npm run dev:local`.
 
 ### 3. Complete the web setup wizard
 
 On first run, the server requires setup before login.
 
-1. Open **http://localhost:5173/setup**
+1. Open **http://localhost:8080/setup**
 2. Create your first admin account
 3. Configure retention and core system limits
 4. Continue to sign in using your new admin credentials
@@ -100,6 +102,54 @@ The application will be available on port **8080** (configurable via `VMS_PORT` 
 docker compose logs -f vms-backend
 ```
 
+### 4. Keep it always running after reboot (Linux systemd)
+
+From the project root:
+
+```bash
+chmod +x scripts/install-systemd-service.sh scripts/uninstall-systemd-service.sh
+sudo ./scripts/install-systemd-service.sh
+```
+
+This creates and enables `vms-cameraserver.service`, which runs `docker compose up -d` at boot.
+
+Useful commands:
+
+```bash
+sudo systemctl status vms-cameraserver
+sudo journalctl -u vms-cameraserver -f
+sudo systemctl restart vms-cameraserver
+```
+
+To remove auto-start:
+
+```bash
+sudo ./scripts/uninstall-systemd-service.sh
+```
+
+### 5. Keep it always running on Windows (PowerShell + Task Scheduler)
+
+Run this from an elevated PowerShell window on the Windows host:
+
+```powershell
+cd V:\VMS-CameraServer
+powershell -ExecutionPolicy Bypass -File .\scripts\install-startup-task.ps1 -ProjectPath "V:\VMS-CameraServer"
+```
+
+This creates a startup task named `VMS-CameraServer-Autostart` that runs:
+
+```powershell
+docker compose up -d
+```
+
+Useful commands:
+
+```powershell
+Get-ScheduledTask -TaskName 'VMS-CameraServer-Autostart'
+Start-ScheduledTask -TaskName 'VMS-CameraServer-Autostart'
+Unregister-ScheduledTask -TaskName 'VMS-CameraServer-Autostart' -Confirm:$false
+```
+
 ### Fresh Start on V
 
 If you are starting from scratch, use the V-drive Docker path only:
@@ -128,6 +178,7 @@ Copy `.env.example` to `.env` and adjust as needed.
 | Variable | Default | Description |
 |---|---|---|
 | `JWT_SECRET` | *(required)* | Secret key for signing JWT tokens — use a long random string |
+| `ADMIN_BOOTSTRAP_PASSWORD` | *(required on first boot)* | Password used to create the initial admin account |
 | `PORT` | `3001` | Backend API port |
 | `NODE_ENV` | `production` | `development` or `production` |
 | `VMS_PORT` | `8080` | Public-facing nginx port (Docker only) |

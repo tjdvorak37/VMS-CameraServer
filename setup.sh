@@ -49,6 +49,15 @@ if [ ! -f .env ]; then
   else
     warn "openssl not found — please manually update JWT_SECRET in .env"
   fi
+
+  if command -v openssl >/dev/null 2>&1; then
+    ADMIN_PASSWORD=$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9@#%+=_- ' | head -c 20)
+    sed -i "s/change-me-to-a-strong-admin-password/$ADMIN_PASSWORD/g" .env
+    success "Generated secure admin bootstrap password"
+    echo -e "  Initial admin password: ${BLUE}${ADMIN_PASSWORD}${NC}"
+  else
+    warn "openssl not found — please manually update ADMIN_BOOTSTRAP_PASSWORD in .env"
+  fi
 else
   info ".env already exists, skipping..."
 fi

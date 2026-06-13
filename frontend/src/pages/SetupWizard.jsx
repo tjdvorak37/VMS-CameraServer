@@ -22,6 +22,7 @@ export default function SetupWizard() {
   const navigate = useNavigate()
   const [checking, setChecking] = useState(true)
   const [alreadySetup, setAlreadySetup] = useState(false)
+  const [statusError, setStatusError] = useState('')
   const [saving, setSaving] = useState(false)
   const [step, setStep] = useState(1)
   const [form, setForm] = useState({
@@ -36,34 +37,33 @@ export default function SetupWizard() {
 
   const currentStep = useMemo(() => STEP_CONFIG.find(s => s.id === step), [step])
 
-  useEffect(() => {
-    let isMounted = true
+  const checkSetupStatus = async () => {
+    setChecking(true)
+    setStatusError('')
 
-    setupApi.status()
-      .then(res => {
-        if (!isMounted) return
+    try {
+      const res = await setupApi.status()
 
-        const setupCompleted = Boolean(res.data?.setupCompleted)
-        const defaults = res.data?.defaults || {}
+      const setupCompleted = Boolean(res.data?.setupCompleted)
+      const defaults = res.data?.defaults || {}
 
-        setAlreadySetup(setupCompleted)
-        setForm(prev => ({
-          ...prev,
-          retention_days: String(defaults.retention_days ?? prev.retention_days),
-          max_cameras: String(defaults.max_cameras ?? prev.max_cameras),
-          snapshot_interval: String(defaults.snapshot_interval ?? prev.snapshot_interval),
-        }))
-      })
-      .catch(() => {
-        toast.error('Unable to load setup status')
-      })
-      .finally(() => {
-        if (isMounted) setChecking(false)
-      })
-
-    return () => {
-      isMounted = false
+      setAlreadySetup(setupCompleted)
+      setForm(prev => ({
+        ...prev,
+        retention_days: String(defaults.retention_days ?? prev.retention_days),
+        max_cameras: String(defaults.max_cameras ?? prev.max_cameras),
+        snapshot_interval: String(defaults.snapshot_interval ?? prev.snapshot_interval),
+      }))
+    } catch (_) {
+      setStatusError('Unable to verify setup status. Check server connectivity and retry.')
+    } finally {
+      setChecking(false)
     }
+  }
+
+  useEffect(() => {
+    checkSetupStatus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const validateAccountStep = () => {
@@ -172,6 +172,38 @@ export default function SetupWizard() {
               onClick={() => navigate('/login', { replace: true })}
             >
               Go to Sign In
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (statusError) {
+    return (
+      <div className="min-h-screen bg-surface-900 flex items-center justify-center p-4">
+        <div className="w-full max-w-xl card p-8 text-center space-y-4">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-warning/20 border border-warning/30 mx-auto">
+            <ServerCog size={28} className="text-warning" />
+          </div>
+          <h1 className="text-2xl font-bold text-slate-100">Setup Status Unavailable</h1>
+          <p className="text-slate-400">
+            {statusError}
+          </p>
+          <div className="pt-2 flex items-center justify-center gap-3">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => navigate('/login', { replace: true })}
+            >
+              Go to Sign In
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={checkSetupStatus}
+            >
+              Retry Status Check
             </button>
           </div>
         </div>

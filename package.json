@@ -4,7 +4,8 @@
   "description": "VMS Pro - Professional Video Management System",
   "scripts": {
     "install:all": "npm install --prefix backend && npm install --prefix frontend",
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev": "npm run docker:up",
+    "dev:local": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build",

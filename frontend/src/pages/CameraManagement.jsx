@@ -526,26 +526,58 @@ function DiscoverModal({ onAdd, onAddBatch, onClose }) {
 }
 
 export default function CameraManagement() {
-  const { isOperator, isAdmin } = useAuth()
+  const { user, isOperator, isAdmin, loading: authLoading } = useAuth()
   const [cameras, setCameras] = useState([])
   const [loading, setLoading] = useState(true)
+  const [cameraLoadError, setCameraLoadError] = useState('')
   const [search, setSearch] = useState('')
   const [modal, setModal] = useState(null) // null | 'add' | 'edit' | 'discover'
   const [editCamera, setEditCamera] = useState(null)
   const [processing, setProcessing] = useState({})
+  const [diagnosingOffline, setDiagnosingOffline] = useState(false)
+  const lastGoodCamerasRef = useRef([])
 
   const fetchCameras = useCallback(() => {
     cameraApi.list()
-      .then(res => setCameras(res.data))
-      .catch(console.error)
+      .then(res => {
+        const nextCameras = Array.isArray(res.data) ? res.data : []
+
+        if (nextCameras.length > 0) {
+          lastGoodCamerasRef.current = nextCameras
+          setCameras(nextCameras)
+          setCameraLoadError('')
+          return
+        }
+
+        if (lastGoodCamerasRef.current.length > 0) {
+          setCameraLoadError('Camera list temporarily unavailable. Showing last known cameras.')
+          return
+        }
+
+        setCameras([])
+        setCameraLoadError('')
+      })
+      .catch((err) => {
+        console.error(err)
+        if (lastGoodCamerasRef.current.length > 0) {
+          setCameras(lastGoodCamerasRef.current)
+          setCameraLoadError('Camera list temporarily unavailable. Showing last known cameras.')
+          return
+        }
+
+        setCameraLoadError('Unable to load camera list')
+      })
       .finally(() => setLoading(false))
   }, [])
 
   useEffect(() => {
+    // Wait for auth context to load before fetching cameras
+    if (authLoading) return
+    
     fetchCameras()
     const i = setInterval(fetchCameras, 20000)
     return () => clearInterval(i)
-  }, [fetchCameras])
+  }, [fetchCameras, authLoading])
 
   const deleteCamera = async (cam) => {
     if (!confirm(`Delete camera "${cam.name}"? This will also delete all recordings.`)) return
@@ -626,6 +658,72 @@ export default function CameraManagement() {
     }
   }
 
+  const testRtsp = async (cam) => {
+    const key = `test-${cam.id}`
+    setProcessing(p => ({ ...p, [key]: true }))
+    try {
+      const res = await cameraApi.testStream(cam.id)
+      const result = res.data || {}
+      const endpoint = `${cam.ip_address}:${cam.port || 554}`
+
+      if (result.ok) {
+        toast.success(`RTSP OK: ${cam.name}`)
+      } else {
+        const reason = result.reason === 'network_unreachable' || result.reason === 'timeout'
+          ? `Server cannot reach ${endpoint}. Check route/firewall between server and camera LAN.`
+          : (result.message || 'RTSP test failed')
+        toast.error(`${cam.name}: ${reason}`)
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'RTSP test failed')
+    } finally {
+      setProcessing(p => ({ ...p, [key]: false }))
+    }
+  }
+
+  const diagnoseOfflineCameras = async () => {
+    const offline = cameras.filter(c => c.status !== 'online')
+    if (offline.length === 0) {
+      toast.success('No offline cameras to diagnose')
+      return
+    }
+
+    setDiagnosingOffline(true)
+    try {
+      let successCount = 0
+      const failures = []
+
+      for (const cam of offline) {
+        try {
+          const res = await cameraApi.testStream(cam.id)
+          const result = res.data || {}
+          if (result.ok) successCount += 1
+          else failures.push({ name: cam.name, reason: result.reason, message: result.message })
+        } catch (err) {
+          failures.push({
+            name: cam.name,
+            reason: 'probe_error',
+            message: err.response?.data?.error || 'RTSP test failed',
+          })
+        }
+      }
+
+      if (failures.length === 0) {
+        toast.success(`RTSP diagnostics passed for ${successCount} camera${successCount === 1 ? '' : 's'}`)
+      } else {
+        const networkFailures = failures.filter(f => f.reason === 'network_unreachable' || f.reason === 'timeout').length
+        if (networkFailures === failures.length) {
+          toast.error('All offline cameras are unreachable from the server. This is server-to-camera network routing/firewall, not browser access.')
+        } else {
+          const names = failures.map(f => f.name).join(', ')
+          toast.error(`RTSP issues detected: ${names}`)
+        }
+      }
+    } finally {
+      setDiagnosingOffline(false)
+    }
+  }
+
   const handleAddBatch = async (devices, options = {}) => {
     const { username = '', password = '', rtspForDevice } = options
     let added = 0, failed = 0
@@ -665,8 +763,31 @@ export default function CameraManagement() {
     (c.location || '').toLowerCase().includes(search.toLowerCase())
   )
 
+  if (authLoading) {
+    return (
+      <div className="flex justify-center py-16">
+        <Loader2 size={32} className="animate-spin text-accent" />
+      </div>
+    )
+  }
+
+  if (!isOperator) {
+    return (
+      <div className="space-y-5">
+        <div className="rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-slate-300">
+          You do not have permission to manage cameras. Admin or Operator role is required.
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-5 animate-fade-in">
+      {/* User context display */}
+      <div className="text-xs text-slate-500">
+        Logged in as: <span className="text-slate-300 font-medium">{user?.username}</span> ({user?.role})
+      </div>
+
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-48">
@@ -682,6 +803,14 @@ export default function CameraManagement() {
           <RefreshCw size={14} className="mr-1.5" />Refresh
         </button>
         {isOperator && (
+          <button onClick={diagnoseOfflineCameras} className="btn-secondary" disabled={diagnosingOffline}>
+            {diagnosingOffline
+              ? <Loader2 size={14} className="mr-1.5 animate-spin" />
+              : <Scan size={14} className="mr-1.5" />}
+            Diagnose Offline
+          </button>
+        )}
+        {isOperator && (
           <>
             <button onClick={() => setModal('discover')} className="btn-secondary">
               <Scan size={14} className="mr-1.5" />Discover
@@ -694,6 +823,12 @@ export default function CameraManagement() {
       </div>
 
       {/* Stats bar */}
+      {cameraLoadError && (
+        <div className="rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-slate-300">
+          {cameraLoadError}
+        </div>
+      )}
+
       <div className="flex items-center gap-6 text-sm">
         <span className="text-slate-400">{cameras.length} total</span>
         <span className="text-success">{cameras.filter(c => c.status === 'online').length} online</span>
@@ -758,6 +893,16 @@ export default function CameraManagement() {
                   {isOperator && (
                     <td>
                       <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => testRtsp(cam)}
+                          disabled={!!processing[`test-${cam.id}`]}
+                          className="btn-ghost p-1.5 text-accent hover:text-blue-300"
+                          title="Verify RTSP"
+                        >
+                          {processing[`test-${cam.id}`]
+                            ? <Loader2 size={15} className="animate-spin" />
+                            : <Search size={15} />}
+                        </button>
                         <button
                           onClick={() => toggleStream(cam)}
                           disabled={!!processing[`stream-${cam.id}`]}

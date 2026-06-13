@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Grid, Layout, Maximize2, RefreshCw, Camera as CameraIcon, RotateCw } from 'lucide-react'
 import VideoPlayer from '../components/VideoPlayer'
-import { cameraApi } from '../services/api'
+import { cameraApi, streamApi } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
 import toast from 'react-hot-toast'
 
@@ -42,11 +42,44 @@ export default function LiveView() {
   const [layout, setLayout] = useState(4)
   const [selected, setSelected] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [recovering, setRecovering] = useState(false)
+  const [rotating, setRotating] = useState({})
+  const [diagnosing, setDiagnosing] = useState(false)
+  const [diagnostics, setDiagnostics] = useState({})
+  const [diagnosticsUpdatedAt, setDiagnosticsUpdatedAt] = useState(null)
+  const [cameraLoadError, setCameraLoadError] = useState('')
+  const lastGoodCamerasRef = useRef([])
 
   const fetchCameras = useCallback(() => {
     cameraApi.list()
-      .then(res => setCameras(res.data))
-      .catch(console.error)
+      .then(res => {
+        const nextCameras = Array.isArray(res.data) ? res.data : []
+
+        if (nextCameras.length > 0) {
+          lastGoodCamerasRef.current = nextCameras
+          setCameras(nextCameras)
+          setCameraLoadError('')
+          return
+        }
+
+        if (lastGoodCamerasRef.current.length > 0) {
+          setCameraLoadError('Camera list temporarily unavailable. Showing last known cameras.')
+          return
+        }
+
+        setCameras([])
+        setCameraLoadError('')
+      })
+      .catch(err => {
+        console.error(err)
+        if (lastGoodCamerasRef.current.length > 0) {
+          setCameras(lastGoodCamerasRef.current)
+          setCameraLoadError('Camera list temporarily unavailable. Showing last known cameras.')
+          return
+        }
+
+        setCameraLoadError('Unable to load camera list')
+      })
       .finally(() => setLoading(false))
   }, [])
 
@@ -64,20 +97,77 @@ export default function LiveView() {
   const streamUrl = (camera) =>
     `/api/streams/${camera.id}/live.m3u8`
 
+  const recoverLiveView = async () => {
+    setRecovering(true)
+    try {
+      const res = await streamApi.reconnectAll()
+      const restarted = res.data?.restarted || 0
+      toast.success(`Live recovery started for ${restarted} camera${restarted === 1 ? '' : 's'}`)
+      setTimeout(fetchCameras, 1500)
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Unable to start live view recovery')
+    } finally {
+      setRecovering(false)
+    }
+  }
+
+  const runStreamDiagnostics = async () => {
+    if (diagnosing || cameras.length === 0) return
+
+    setDiagnosing(true)
+    try {
+      const checks = await Promise.all(cameras.map(async (camera) => {
+        try {
+          const res = await cameraApi.testStream(camera.id)
+          const result = res.data || {}
+          return [camera.id, {
+            ok: Boolean(result.ok),
+            reason: result.reason || (result.ok ? 'ok' : 'unknown'),
+            message: result.message || (result.ok ? 'RTSP connection successful' : 'RTSP check failed'),
+            detail: result.detail || '',
+          }]
+        } catch (err) {
+          return [camera.id, {
+            ok: false,
+            reason: 'probe_error',
+            message: err.response?.data?.error || 'RTSP check failed',
+            detail: err.response?.data?.details || '',
+          }]
+        }
+      }))
+
+      const nextDiagnostics = Object.fromEntries(checks)
+      const failedCount = Object.values(nextDiagnostics).filter(result => !result.ok).length
+
+      setDiagnostics(nextDiagnostics)
+      setDiagnosticsUpdatedAt(new Date())
+
+      if (failedCount === 0) {
+        toast.success('All camera RTSP checks passed')
+      } else {
+        toast.error(`${failedCount} camera${failedCount === 1 ? '' : 's'} failed RTSP diagnostics`)
+      }
+    } finally {
+      setDiagnosing(false)
+    }
+  }
+
   const rotateCamera = async (camera) => {
     if (!isOperator) return
+    if (rotating[camera.id]) return
 
     const current = Number(camera.rotation) || 0
     const nextRotation = (current + 90) % 360
 
+    setRotating(prev => ({ ...prev, [camera.id]: true }))
     try {
       await cameraApi.update(camera.id, { rotation: nextRotation })
-      setCameras(prev => prev.map(c => (
-        c.id === camera.id ? { ...c, rotation: nextRotation } : c
-      )))
       toast.success(`${camera.name} rotated to ${nextRotation}\u00b0`)
+      fetchCameras()
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to rotate camera')
+    } finally {
+      setRotating(prev => ({ ...prev, [camera.id]: false }))
     }
   }
 
@@ -102,6 +192,26 @@ export default function LiveView() {
         </div>
 
         <div className="flex items-center gap-2">
+          {isOperator && (
+            <button
+              onClick={runStreamDiagnostics}
+              disabled={diagnosing || cameras.length === 0}
+              className="btn-secondary text-sm"
+              title="Run RTSP diagnostics for all cameras"
+            >
+              {diagnosing ? 'Diagnosing...' : 'Diagnose Streams'}
+            </button>
+          )}
+
+          <button
+            onClick={recoverLiveView}
+            disabled={recovering}
+            className="btn-secondary text-sm"
+            title="Restart all camera streams"
+          >
+            {recovering ? 'Recovering...' : 'Recover Live View'}
+          </button>
+
           <button
             onClick={fetchCameras}
             className="btn-ghost p-2"
@@ -132,6 +242,44 @@ export default function LiveView() {
         </div>
       </div>
 
+      {cameraLoadError && (
+        <div className="rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-slate-300">
+          {cameraLoadError}
+        </div>
+      )}
+
+      {Object.keys(diagnostics).length > 0 && (
+        <div className="rounded-lg border border-surface-500 bg-surface-700/60 px-4 py-3 text-sm text-slate-300">
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <span className="font-medium text-slate-200">Stream Diagnostics</span>
+            <span className="text-xs text-slate-500">
+              {diagnosticsUpdatedAt ? `Updated ${diagnosticsUpdatedAt.toLocaleTimeString()}` : ''}
+            </span>
+          </div>
+          <div className="grid gap-1">
+            {cameras.map(camera => {
+              const result = diagnostics[camera.id]
+              if (!result) return null
+
+              const statusClass = result.ok
+                ? 'text-success'
+                : (result.reason === 'network_unreachable' || result.reason === 'timeout')
+                  ? 'text-warning'
+                  : 'text-danger'
+
+              return (
+                <div key={`diag-${camera.id}`} className="flex items-center justify-between gap-3 text-xs">
+                  <span className="text-slate-300 truncate pr-2">{camera.name}</span>
+                  <span className={`${statusClass} text-right`}>
+                    {result.ok ? 'OK' : `${result.reason || 'failed'}: ${result.message}`}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Camera Grid */}
       {cameras.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center">
@@ -140,58 +288,88 @@ export default function LiveView() {
           <p className="text-sm text-slate-500">Go to Camera Management to add cameras to your system.</p>
         </div>
       ) : (
-        <div
-          className={`flex-1 grid gap-2 content-start`}
-          style={{
-            gridTemplateColumns: selected ? '1fr' : `repeat(${layoutConfig?.cols || 2}, 1fr)`,
-          }}
-        >
-          {visibleCameras.map(camera => (
-            <div key={camera.id} className="flex flex-col gap-1" onDoubleClick={() => setSelected(camera.id)}>
-              <div className="relative group">
-                <VideoPlayer
-                  src={streamUrl(camera)}
-                  cameraName={camera.name}
-                  cameraRotation={camera.rotation}
-                  onRotate={() => rotateCamera(camera)}
-                  rotateDisabled={!isOperator}
-                  rotateTitle={isOperator ? 'Rotate camera' : 'Rotate requires operator or admin role'}
-                  showControls
-                />
-              </div>
-              <div className="flex items-center justify-between gap-2 px-1 text-xs text-slate-400">
-                <span className="truncate pr-2">{camera.location || 'No location'}</span>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <span>{String(camera.resolution || '').replace('×', 'x')}</span>
-                  {isOperator && (
-                    <button
-                      type="button"
-                      onClick={() => rotateCamera(camera)}
-                      className="inline-flex items-center gap-1 rounded-md border border-slate-600/80 bg-surface-800/80 px-2 py-0.5 text-[11px] text-slate-300 hover:border-accent hover:text-accent transition-colors"
-                      title="Rotate camera"
-                      aria-label="Rotate camera"
-                    >
-                      <RotateCw size={12} />
-                      Rotate
-                    </button>
-                  )}
-                </div>
-              </div>
+        <>
+          {cameras.filter(c => c.status === 'online').length === 0 && (
+            <div className="rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-slate-300 flex items-center justify-between gap-3">
+              <span>No cameras are currently online. Use recovery to restart all streams.</span>
+              <button
+                type="button"
+                onClick={recoverLiveView}
+                disabled={recovering}
+                className="btn-secondary text-xs"
+              >
+                {recovering ? 'Recovering...' : 'Run Recovery'}
+              </button>
             </div>
-          ))}
+          )}
 
-          {/* Empty placeholder cells */}
-          {!selected && cameras.length < layout &&
-            Array.from({ length: layout - cameras.length }).map((_, i) => (
-              <div key={`empty-${i}`} className="camera-cell flex items-center justify-center">
-                <div className="flex flex-col items-center gap-2 text-slate-700">
-                  <CameraIcon size={24} />
-                  <span className="text-xs">Empty</span>
+          <div
+            className={`flex-1 grid gap-2 content-start`}
+            style={{
+              gridTemplateColumns: selected ? '1fr' : `repeat(${layoutConfig?.cols || 2}, 1fr)`,
+            }}
+          >
+            {visibleCameras.map(camera => (
+              <div key={camera.id} className="flex flex-col gap-1" onDoubleClick={() => setSelected(camera.id)}>
+                <div className="relative group">
+                  <VideoPlayer
+                    src={streamUrl(camera)}
+                    cameraName={camera.name}
+                    cameraRotation={camera.rotation}
+                    connectionLabel={camera.status === 'offline' ? 'Camera offline' : 'Connecting to stream...'}
+                    unavailableLabel={camera.status === 'offline' ? 'Camera unreachable' : 'Stream warming up or unavailable'}
+                    showControls
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-2 px-1 text-xs text-slate-400">
+                  <span className="truncate pr-2">{camera.location || 'No location'}</span>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span>{String(camera.resolution || '').replace('×', 'x')}</span>
+                    {diagnostics[camera.id] && !diagnostics[camera.id].ok && (
+                      <span
+                        className={`rounded-md px-2 py-0.5 text-[11px] ${
+                          diagnostics[camera.id].reason === 'network_unreachable' || diagnostics[camera.id].reason === 'timeout'
+                            ? 'bg-warning/20 text-warning'
+                            : 'bg-danger/20 text-danger'
+                        }`}
+                        title={diagnostics[camera.id].message}
+                      >
+                        {diagnostics[camera.id].reason === 'network_unreachable' || diagnostics[camera.id].reason === 'timeout'
+                          ? 'Network'
+                          : 'RTSP Error'}
+                      </span>
+                    )}
+                    {isOperator && (
+                      <button
+                        type="button"
+                        onClick={() => rotateCamera(camera)}
+                        disabled={Boolean(rotating[camera.id])}
+                        className="inline-flex items-center gap-1 rounded-md border border-slate-600/80 bg-surface-800/80 px-2 py-0.5 text-[11px] text-slate-300 hover:border-accent hover:text-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Rotate camera"
+                        aria-label="Rotate camera"
+                      >
+                        <RotateCw size={12} />
+                        {rotating[camera.id] ? 'Rotating...' : 'Rotate'}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
-            ))
-          }
-        </div>
+            ))}
+
+            {/* Empty placeholder cells */}
+            {!selected && cameras.length < layout &&
+              Array.from({ length: layout - cameras.length }).map((_, i) => (
+                <div key={`empty-${i}`} className="camera-cell flex items-center justify-center">
+                  <div className="flex flex-col items-center gap-2 text-slate-700">
+                    <CameraIcon size={24} />
+                    <span className="text-xs">Empty</span>
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+        </>
       )}
 
       {/* Camera strip (thumbnail selector) */}

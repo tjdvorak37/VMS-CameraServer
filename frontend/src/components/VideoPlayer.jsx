@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import Hls from 'hls.js'
-import { Volume2, VolumeX, Maximize2, RefreshCw, WifiOff, RotateCw } from 'lucide-react'
+import { Volume2, VolumeX, Maximize2, RefreshCw, WifiOff } from 'lucide-react'
 
 /**
  * HLS Live Video Player component.
@@ -12,13 +12,30 @@ export default function VideoPlayer({
   className = '',
   showControls = true,
   cameraRotation = 0,
-  onRotate = null,
-  rotateDisabled = false,
-  rotateTitle = 'Rotate camera',
+  connectionLabel = 'Connecting...',
+  unavailableLabel = 'Stream unavailable',
 }) {
   const videoRef = useRef(null)
   const hlsRef = useRef(null)
   const [state, setState] = useState({ muted: true, status: 'loading', error: null })
+
+  const getStreamErrorMessage = (data) => {
+    const statusCode = data?.response?.code || data?.response?.status
+
+    if (statusCode === 401 || statusCode === 403) {
+      return 'Camera access denied'
+    }
+
+    if (statusCode === 404) {
+      return 'Stream not found'
+    }
+
+    if (statusCode === 503) {
+      return unavailableLabel
+    }
+
+    return unavailableLabel
+  }
 
   const initHls = () => {
     const video = videoRef.current
@@ -57,7 +74,7 @@ export default function VideoPlayer({
 
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
-          setState(s => ({ ...s, status: 'error', error: 'Stream unavailable' }))
+          setState(s => ({ ...s, status: 'error', error: getStreamErrorMessage(data) }))
           setTimeout(initHls, 5000) // Auto-retry
         }
       })
@@ -102,22 +119,6 @@ export default function VideoPlayer({
 
   return (
     <div className={`camera-cell group ${className}`}>
-      {typeof onRotate === 'function' && (
-        <button
-          onClick={onRotate}
-          disabled={rotateDisabled}
-          className={`absolute top-2 right-2 z-30 inline-flex items-center justify-center rounded-lg px-2 py-1 text-xs backdrop-blur-sm transition-colors ${
-            rotateDisabled
-              ? 'bg-black/40 text-white/30 cursor-not-allowed'
-              : 'bg-black/55 text-white/80 hover:text-white hover:bg-black/75'
-          }`}
-          title={rotateTitle}
-          aria-label={rotateTitle}
-        >
-          <RotateCw size={14} />
-        </button>
-      )}
-
       <video
         ref={videoRef}
         muted={state.muted}
@@ -131,7 +132,7 @@ export default function VideoPlayer({
       {state.status === 'loading' && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/60">
           <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin mb-2" />
-          <span className="text-xs text-slate-400">Connecting...</span>
+          <span className="text-xs text-slate-400">{connectionLabel}</span>
         </div>
       )}
 
@@ -175,20 +176,6 @@ export default function VideoPlayer({
           >
             {state.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
           </button>
-          {typeof onRotate === 'function' && (
-            <button
-              onClick={onRotate}
-              disabled={rotateDisabled}
-              className={`p-1 transition-colors ${
-                rotateDisabled
-                  ? 'text-white/30 cursor-not-allowed'
-                  : 'text-white/70 hover:text-white'
-              }`}
-              title={rotateTitle}
-            >
-              <RotateCw size={14} />
-            </button>
-          )}
           <button
             onClick={handleFullscreen}
             className="p-1 text-white/70 hover:text-white transition-colors"

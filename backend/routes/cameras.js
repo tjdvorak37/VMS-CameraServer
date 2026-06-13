@@ -16,7 +16,10 @@ function hasFreshManifest(cameraId) {
     if (!fs.existsSync(m3u8Path)) return false;
     const stats = fs.statSync(m3u8Path);
     const ageMs = Date.now() - stats.mtimeMs;
-    return stats.size > 0 && ageMs <= 15000;
+    if (stats.size <= 0 || ageMs > 15000) return false;
+
+    const text = fs.readFileSync(m3u8Path, 'utf8');
+    return /(?:^|\n)\s*[^#\n]+\.ts(?:\?[^\n]*)?\s*(?:\n|$)/m.test(text);
   } catch (_) {
     return false;
   }
@@ -171,8 +174,7 @@ router.put(
         updates.rtsp_url !== undefined ||
         updates.username !== undefined ||
         updates.password !== undefined ||
-        updates.port !== undefined ||
-        updates.rotation !== undefined;
+        updates.port !== undefined;
 
       const recordingRelevantChanged =
         streamRelevantChanged || updates.recording_enabled !== undefined;
@@ -249,6 +251,25 @@ router.post('/:id/snapshot', authenticate, async (req, res) => {
     return res.json({ snapshot: snapshotPath });
   } catch (err) {
     return res.status(500).json({ error: 'Snapshot failed', details: err.message });
+  }
+});
+
+// POST /api/cameras/:id/stream/test
+router.post('/:id/stream/test', authenticate, requireRole('admin', 'operator'), async (req, res) => {
+  const db = getDb();
+  const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+  if (!camera) return res.status(404).json({ error: 'Camera not found' });
+
+  try {
+    const result = await streamManager.testRtspConnection(camera, { timeoutMs: 12000 });
+    return res.json(result);
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      reason: 'probe_error',
+      error: 'RTSP test failed',
+      details: err.message,
+    });
   }
 });
 

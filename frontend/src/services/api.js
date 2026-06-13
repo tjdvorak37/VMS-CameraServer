@@ -48,6 +48,7 @@ export const cameraApi = {
   delete: (id) => api.delete(`/cameras/${id}`),
   discover: (data) => api.post('/cameras/discover', data),
   snapshot: (id) => api.post(`/cameras/${id}/snapshot`),
+  testStream: (id) => api.post(`/cameras/${id}/stream/test`),
   startStream: (id) => api.post(`/cameras/${id}/stream/start`),
   stopStream: (id) => api.post(`/cameras/${id}/stream/stop`),
   startRecording: (id) => api.post(`/cameras/${id}/recording/start`),
@@ -71,6 +72,11 @@ export const eventApi = {
   acknowledge: (id) => api.put(`/events/${id}/acknowledge`),
   acknowledgeAll: () => api.put('/events/acknowledge-all'),
   delete: (id) => api.delete(`/events/${id}`),
+}
+
+export const streamApi = {
+  reconnectAll: () => api.post('/streams/reconnect-all'),
+  reconnectOne: (cameraId) => api.post(`/streams/${cameraId}/reconnect`),
 }
 
 export const userApi = {

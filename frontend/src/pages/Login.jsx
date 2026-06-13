@@ -28,7 +28,8 @@ export default function Login() {
       })
       .catch(() => {
         if (!isMounted) return
-        toast.error('Unable to verify setup status')
+        // Treat setup-status failures as non-fatal so login is still possible.
+        setSetupCompleted(true)
       })
       .finally(() => {
         if (isMounted) setSetupLoading(false)

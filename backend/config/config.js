@@ -1,5 +1,17 @@
 // Application configuration
 const path = require('path');
+const crypto = require('crypto');
+
+function resolveSecret(name) {
+  const value = process.env[name];
+  if (value && value.trim()) return value.trim();
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(`${name} is required in production`);
+  }
+
+  return crypto.randomBytes(32).toString('hex');
+}
 
 module.exports = {
   // Server
@@ -7,7 +19,7 @@ module.exports = {
   NODE_ENV: process.env.NODE_ENV || 'development',
 
   // JWT
-  JWT_SECRET: process.env.JWT_SECRET || 'vms-super-secret-key-change-in-production',
+  JWT_SECRET: resolveSecret('JWT_SECRET'),
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '24h',
   JWT_REFRESH_EXPIRES_IN: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
 
@@ -27,7 +39,8 @@ module.exports = {
   // HLS settings
   FFMPEG_PATH: process.env.FFMPEG_PATH || 'ffmpeg',
   HLS_TIME: parseInt(process.env.HLS_TIME) || 2,        // seconds per HLS chunk
-  HLS_LIST_SIZE: parseInt(process.env.HLS_LIST_SIZE) || 5, // chunks in playlist
+  HLS_LIST_SIZE: parseInt(process.env.HLS_LIST_SIZE) || 12, // chunks in playlist
+  HLS_DELETE_THRESHOLD: parseInt(process.env.HLS_DELETE_THRESHOLD) || 30,
 
   // Network discovery
   DISCOVERY_TIMEOUT: parseInt(process.env.DISCOVERY_TIMEOUT) || 5000,
@@ -42,9 +55,4 @@ module.exports = {
   CORS_ORIGINS: process.env.CORS_ORIGINS
     ? process.env.CORS_ORIGINS.split(',')
     : ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:3001'],
-
-  // Rate limiting
-  RATE_LIMIT_WINDOW: 15 * 60 * 1000, // 15 minutes
-  RATE_LIMIT_MAX: 200,
-  LOGIN_RATE_LIMIT_MAX: 10,
 };
