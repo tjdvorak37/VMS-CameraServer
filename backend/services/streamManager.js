@@ -15,6 +15,7 @@ const intentionallyStopped = new Set();
 const pendingRestartTimers = new Map();
 const restartBackoffMs = new Map();
 const cameraRtspTransportOverride = new Map();
+const cameraRtspUrlOverride = new Map();
 const STREAM_MONITOR_INTERVAL_MS = 5000;
 const STREAM_STALE_AFTER_MS = Number(process.env.STREAM_STALE_AFTER_MS) > 0
   ? Number(process.env.STREAM_STALE_AFTER_MS)
@@ -130,16 +131,49 @@ function isStreamHealthy(cameraId) {
 /**
  * Build an effective RTSP URL, embedding stored credentials if not already in the URL.
  */
-function buildRtspUrl(camera) {
-  if (!camera.username && !camera.password) return camera.rtsp_url;
+function buildRtspUrl(camera, sourceUrl = null) {
+  const effectiveUrl = sourceUrl || cameraRtspUrlOverride.get(Number(camera.id)) || camera.rtsp_url;
+  if (!camera.username && !camera.password) return effectiveUrl;
   try {
-    const url = new URL(camera.rtsp_url);
+    const url = new URL(effectiveUrl);
     // Always prefer stored camera credentials over any stale credentials in rtsp_url.
     if (camera.username) url.username = camera.username;
     if (camera.password) url.password = camera.password;
     return url.toString();
   } catch (_) {
-    return camera.rtsp_url;
+    return effectiveUrl;
+  }
+}
+
+function buildRtspCandidates(camera) {
+  const ip = String(camera.ip_address || '').trim();
+  const port = Number(camera.port) > 0 ? Number(camera.port) : 554;
+  if (!ip) return [];
+
+  const candidates = [];
+  for (let channel = 1; channel <= 4; channel += 1) {
+    candidates.push(`rtsp://${ip}:${port}/cam/realmonitor?channel=${channel}&subtype=0`);
+    candidates.push(`rtsp://${ip}:${port}/cam/realmonitor?channel=${channel}&subtype=1`);
+    candidates.push(`rtsp://${ip}:${port}/Streaming/Channels/${channel}01`);
+    candidates.push(`rtsp://${ip}:${port}/Streaming/Channels/${channel}02`);
+  }
+
+  candidates.push(`rtsp://${ip}:${port}/stream1`);
+  candidates.push(`rtsp://${ip}:${port}/live`);
+
+  return Array.from(new Set(candidates));
+}
+
+function rememberWorkingRtsp(camera, rtspUrl, transport) {
+  const cameraId = Number(camera.id);
+  setCameraRtspTransport(cameraId, transport);
+  cameraRtspUrlOverride.set(cameraId, rtspUrl);
+
+  try {
+    const db = getDb();
+    db.prepare('UPDATE cameras SET rtsp_url = ? WHERE id = ?').run(rtspUrl, cameraId);
+  } catch (err) {
+    console.warn(`[StreamManager] Could not persist RTSP URL for camera ${cameraId}: ${err.message}`);
   }
 }
 
@@ -332,7 +366,7 @@ function startStream(camera) {
 
     if (isStreamHealthy(id)) {
       entry.status = 'streaming';
-      setCameraRtspTransport(id, transport);
+      rememberWorkingRtsp(camera, buildRtspUrl(camera), transport);
       entry.lastHealthyAt = Date.now();
       restartBackoffMs.set(id, MIN_RESTART_DELAY_MS);
       clearInterval(healthCheckTimer);
@@ -468,7 +502,7 @@ function testRtspConnection(camera, options = {}) {
     const primary = await runRtspProbe(camera, primaryTransport, timeoutMs);
 
     if (primary.ok) {
-      setCameraRtspTransport(camera.id, primaryTransport);
+      rememberWorkingRtsp(camera, buildRtspUrl(camera), primaryTransport);
       return resolve({
         ok: true,
         reason: 'ok',
@@ -486,13 +520,54 @@ function testRtspConnection(camera, options = {}) {
     if (primaryFailedByTransport) {
       const alternate = await runRtspProbe(camera, alternateTransport, timeoutMs);
       if (alternate.ok) {
-        setCameraRtspTransport(camera.id, alternateTransport);
+        rememberWorkingRtsp(camera, buildRtspUrl(camera), alternateTransport);
         return resolve({
           ok: true,
           reason: 'ok',
           message: `RTSP connection successful (${alternateTransport.toUpperCase()})`,
           detail: `Primary transport ${primaryTransport.toUpperCase()} failed and fallback to ${alternateTransport.toUpperCase()} succeeded.`,
         });
+      }
+    }
+
+    // For cameras without credentials, try common multi-lens RTSP path patterns.
+    const noCredentials = !camera.username && !camera.password;
+    if (noCredentials) {
+      const candidates = buildRtspCandidates(camera);
+      for (const candidateUrl of candidates) {
+        if (candidateUrl === buildRtspUrl(camera)) continue;
+
+        const candidatePrimary = await runRtspProbe(
+          { ...camera, rtsp_url: candidateUrl },
+          primaryTransport,
+          Math.min(timeoutMs, 5000)
+        );
+
+        if (candidatePrimary.ok) {
+          rememberWorkingRtsp(camera, candidateUrl, primaryTransport);
+          return resolve({
+            ok: true,
+            reason: 'ok',
+            message: `RTSP connection successful (${primaryTransport.toUpperCase()})`,
+            detail: `Detected RTSP path automatically: ${candidateUrl}`,
+          });
+        }
+
+        const candidateAlternate = await runRtspProbe(
+          { ...camera, rtsp_url: candidateUrl },
+          alternateTransport,
+          Math.min(timeoutMs, 5000)
+        );
+
+        if (candidateAlternate.ok) {
+          rememberWorkingRtsp(camera, candidateUrl, alternateTransport);
+          return resolve({
+            ok: true,
+            reason: 'ok',
+            message: `RTSP connection successful (${alternateTransport.toUpperCase()})`,
+            detail: `Detected RTSP path automatically: ${candidateUrl}`,
+          });
+        }
       }
     }
 
