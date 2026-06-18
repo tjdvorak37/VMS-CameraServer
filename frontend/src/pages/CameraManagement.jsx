@@ -237,6 +237,37 @@ function AddEditModal({ camera, onClose, onSave }) {
         </div>
 
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+          {!camera?.id && (
+            <div className="rounded-lg border border-accent/40 bg-accent/10 p-3">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="min-w-40">
+                  <label className="label text-xs">Multi-Cam on One IP</label>
+                  <select
+                    className="input"
+                    value={streamCount}
+                    onChange={e => setStreamCount(parseInt(e.target.value, 10) || 4)}
+                  >
+                    <option value="2">2 streams</option>
+                    <option value="4">4 streams</option>
+                    <option value="8">8 streams</option>
+                    <option value="16">16 streams</option>
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddChannels}
+                  disabled={saving || addingChannels}
+                  className="btn-primary"
+                  title={`Create ${streamCount} camera entries from one IP as Stream 1 through Stream ${streamCount}`}
+                >
+                  {addingChannels ? <Loader2 size={16} className="animate-spin inline mr-2" /> : null}
+                  Add Stream 1-{streamCount}
+                </button>
+              </div>
+              <p className="text-xs text-slate-300/90 mt-2">Use this when one recorder IP has multiple camera channels.</p>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
               <label className="label">Camera Name *</label>
@@ -327,38 +358,10 @@ function AddEditModal({ camera, onClose, onSave }) {
                 <span className="text-sm text-slate-300">Enable continuous recording</span>
               </label>
             </div>
-            {!camera?.id && (
-              <div className="col-span-2">
-                <label className="label">Stream Count for Multi-Add</label>
-                <select
-                  className="input"
-                  value={streamCount}
-                  onChange={e => setStreamCount(parseInt(e.target.value, 10) || 4)}
-                >
-                  <option value="2">2 streams</option>
-                  <option value="4">4 streams</option>
-                  <option value="8">8 streams</option>
-                  <option value="16">16 streams</option>
-                </select>
-                <p className="text-xs text-slate-500 mt-1">Used by Add Stream 1-N.</p>
-              </div>
-            )}
           </div>
 
           <div className="flex gap-3 pt-2 border-t border-surface-500">
             <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
-            {!camera?.id && (
-              <button
-                type="button"
-                onClick={handleAddChannels}
-                disabled={saving || addingChannels}
-                className="btn-secondary flex-1"
-                title={`Create ${streamCount} camera entries from one IP as Stream 1 through Stream ${streamCount}`}
-              >
-                {addingChannels ? <Loader2 size={16} className="animate-spin inline mr-2" /> : null}
-                Add Stream 1-{streamCount}
-              </button>
-            )}
             <button type="submit" disabled={saving} className="btn-primary flex-1">
               {saving ? <Loader2 size={16} className="animate-spin inline mr-2" /> : null}
               {camera ? 'Save Changes' : 'Add Camera'}
