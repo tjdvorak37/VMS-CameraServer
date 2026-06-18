@@ -230,9 +230,14 @@ function AddEditModal({ camera, onClose, onSave }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 animate-fade-in">
       <div className="bg-surface-700 border border-surface-500 rounded-2xl w-full max-w-xl shadow-2xl overflow-y-auto max-h-[90vh]">
         <div className="flex items-center justify-between px-6 py-4 border-b border-surface-500">
-          <h2 className="text-lg font-semibold text-slate-100">
-            {camera ? `Edit: ${camera.name}` : 'Add Camera'}
-          </h2>
+          <div>
+            <h2 className="text-lg font-semibold text-slate-100">
+              {camera ? `Edit: ${camera.name}` : 'Add Camera'}
+            </h2>
+            {!camera?.id && (
+              <p className="text-xs text-accent mt-1">Multi-cam mode enabled (use Add Stream 1-N)</p>
+            )}
+          </div>
           <button onClick={onClose} className="btn-ghost p-1.5">✕</button>
         </div>
 
