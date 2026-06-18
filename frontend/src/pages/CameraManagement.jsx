@@ -37,6 +37,91 @@ function buildDefaultRtspUrl({ ip_address, port, username, password, manufacture
   return `rtsp://${creds}${ip}:${rtspPort}${path}`
 }
 
+function buildChannelRtspUrl(baseUrl, channel) {
+  const safeChannel = Math.max(1, Math.min(64, Number(channel) || 1))
+
+  try {
+    const url = new URL(baseUrl)
+
+    if (url.searchParams.has('channel')) {
+      url.searchParams.set('channel', String(safeChannel))
+      return url.toString()
+    }
+
+    const streamChannelsMatch = url.pathname.match(/^(.*\/Streaming\/Channels\/)(\d+)(\d{2})$/i)
+    if (streamChannelsMatch) {
+      const [, prefix, , streamSuffix] = streamChannelsMatch
+      url.pathname = `${prefix}${safeChannel}${streamSuffix}`
+      return url.toString()
+    }
+
+    if (/\/stream\d+$/i.test(url.pathname)) {
+      url.pathname = url.pathname.replace(/\/stream\d+$/i, `/stream${safeChannel}`)
+      return url.toString()
+    }
+
+    url.pathname = `/stream${safeChannel}`
+    return url.toString()
+  } catch {
+    const replaced = String(baseUrl || '').replace(/\/stream\d+$/i, `/stream${safeChannel}`)
+    if (replaced !== baseUrl) return replaced
+    const trimmed = String(baseUrl || '').replace(/\/+$/, '')
+    if (!trimmed) return `rtsp://0.0.0.0:554/stream${safeChannel}`
+    return `${trimmed}/stream${safeChannel}`
+  }
+}
+
+function shouldExpandToChannels(device) {
+  const type = String(device?.device_type || '').toLowerCase()
+  const model = String(device?.model || '').toLowerCase()
+  const profileLabel = String(device?.profile_label || '').toLowerCase()
+  const suggestedRtsp = String(device?.suggested_rtsp || '').toLowerCase()
+
+  return /\b(recorder|nvr|dvr|xvr)\b/.test(type)
+    || /\b(recorder|nvr|dvr|xvr|quad|4ch|4-channel|multi)\b/.test(model)
+    || /\brecorder\b/.test(profileLabel)
+    || /channel=1|\/stream1$|\/Streaming\/Channels\/101$/i.test(suggestedRtsp)
+}
+
+function expandDiscoveredDevices(rawDevices = []) {
+  const expanded = []
+
+  rawDevices.forEach((device, index) => {
+    const baseName = `${device.manufacturer || 'Camera'} ${device.model || ''}`.trim()
+
+    if (shouldExpandToChannels(device)) {
+      for (let channel = 1; channel <= 4; channel += 1) {
+        const suggestedRtsp = buildChannelRtspUrl(
+          device.suggested_rtsp || buildDefaultRtspUrl({
+            ip_address: device.ip,
+            port: device.port || 554,
+            manufacturer: device.manufacturer,
+          }),
+          channel
+        )
+
+        expanded.push({
+          ...device,
+          channel,
+          channel_label: `Stream ${channel}`,
+          display_name: `${baseName} Stream ${channel}`,
+          suggested_rtsp: suggestedRtsp,
+          _device_key: `${device.ip}|stream${channel}|${index}`,
+        })
+      }
+      return
+    }
+
+    expanded.push({
+      ...device,
+      _device_key: `${device.ip}|single|${index}`,
+      display_name: baseName,
+    })
+  })
+
+  return expanded
+}
+
 function AddEditModal({ camera, onClose, onSave }) {
   const [form, setForm] = useState({
     name: camera?.name || '',
@@ -62,6 +147,8 @@ function AddEditModal({ camera, onClose, onSave }) {
     recording_enabled: camera?.recording_enabled !== 0,
   })
   const [saving, setSaving] = useState(false)
+  const [addingChannels, setAddingChannels] = useState(false)
+  const [streamCount, setStreamCount] = useState(4)
   const rtspEdited = useRef(false)
 
   const updateRtsp = (field, value) => {
@@ -89,6 +176,53 @@ function AddEditModal({ camera, onClose, onSave }) {
       toast.error(err.response?.data?.error || err.response?.data?.errors?.[0]?.msg || 'Save failed')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleAddChannels = async () => {
+    if (camera?.id) return
+
+    const ip = String(form.ip_address || '').trim()
+    const baseRtsp = String(form.rtsp_url || '').trim()
+
+    if (!ip || !baseRtsp) {
+      toast.error('IP address and RTSP URL are required')
+      return
+    }
+
+    setAddingChannels(true)
+    let added = 0
+    let failed = 0
+
+    try {
+      const baseName = String(form.name || '').trim() || `${form.manufacturer || 'Camera'} ${form.model || ''}`.trim() || ip
+
+      const count = Math.max(1, Math.min(32, Number(streamCount) || 1))
+
+      for (let channel = 1; channel <= count; channel += 1) {
+        try {
+          await cameraApi.create({
+            ...form,
+            name: `${baseName} Stream ${channel}`,
+            rtsp_url: buildChannelRtspUrl(baseRtsp, channel),
+          })
+          added += 1
+        } catch (_) {
+          failed += 1
+        }
+      }
+
+      if (added > 0) {
+        toast.success(`Added ${added} stream${added === 1 ? '' : 's'} from ${ip}`)
+        onSave()
+        onClose()
+      }
+
+      if (failed > 0) {
+        toast.error(`${failed} stream${failed === 1 ? '' : 's'} failed to add`)
+      }
+    } finally {
+      setAddingChannels(false)
     }
   }
 
@@ -193,10 +327,38 @@ function AddEditModal({ camera, onClose, onSave }) {
                 <span className="text-sm text-slate-300">Enable continuous recording</span>
               </label>
             </div>
+            {!camera?.id && (
+              <div className="col-span-2">
+                <label className="label">Stream Count for Multi-Add</label>
+                <select
+                  className="input"
+                  value={streamCount}
+                  onChange={e => setStreamCount(parseInt(e.target.value, 10) || 4)}
+                >
+                  <option value="2">2 streams</option>
+                  <option value="4">4 streams</option>
+                  <option value="8">8 streams</option>
+                  <option value="16">16 streams</option>
+                </select>
+                <p className="text-xs text-slate-500 mt-1">Used by Add Stream 1-N.</p>
+              </div>
+            )}
           </div>
 
           <div className="flex gap-3 pt-2 border-t border-surface-500">
             <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
+            {!camera?.id && (
+              <button
+                type="button"
+                onClick={handleAddChannels}
+                disabled={saving || addingChannels}
+                className="btn-secondary flex-1"
+                title={`Create ${streamCount} camera entries from one IP as Stream 1 through Stream ${streamCount}`}
+              >
+                {addingChannels ? <Loader2 size={16} className="animate-spin inline mr-2" /> : null}
+                Add Stream 1-{streamCount}
+              </button>
+            )}
             <button type="submit" disabled={saving} className="btn-primary flex-1">
               {saving ? <Loader2 size={16} className="animate-spin inline mr-2" /> : null}
               {camera ? 'Save Changes' : 'Add Camera'}
@@ -215,7 +377,7 @@ function DiscoverModal({ onAdd, onAddBatch, onClose }) {
   const [styleFilter, setStyleFilter] = useState('all')
   const [query, setQuery] = useState('')
   const [discoverySubnets, setDiscoverySubnets] = useState('')
-  const [selectedIps, setSelectedIps] = useState(new Set())
+  const [selectedDeviceKeys, setSelectedDeviceKeys] = useState(new Set())
   const [addingBatch, setAddingBatch] = useState(false)
   const [sharedUsername, setSharedUsername] = useState('')
   const [sharedPassword, setSharedPassword] = useState('')
@@ -231,7 +393,7 @@ function DiscoverModal({ onAdd, onAddBatch, onClose }) {
     setScanning(true)
     const subnets = parseSubnets(discoverySubnets)
     cameraApi.discover(subnets.length > 0 ? { subnets } : undefined)
-      .then(res => setDevices(res.data.devices || []))
+      .then(res => setDevices(expandDiscoveredDevices(res.data.devices || [])))
       .catch((err) => {
         const status = err.response?.status
         const details = err.response?.data?.details
@@ -425,22 +587,22 @@ function DiscoverModal({ onAdd, onAddBatch, onClose }) {
                     className="w-3.5 h-3.5 rounded accent-blue-500"
                     checked={filteredDevices.every(d => selectedIps.has(d.ip))}
                     onChange={e => {
-                      if (e.target.checked) setSelectedIps(new Set(filteredDevices.map(d => d.ip)))
-                      else setSelectedIps(new Set())
+                      if (e.target.checked) setSelectedDeviceKeys(new Set(filteredDevices.map(d => d._device_key)))
+                      else setSelectedDeviceKeys(new Set())
                     }}
                   />
                   Select all
                 </label>
-                {selectedIps.size > 0 && (
+                {selectedDeviceKeys.size > 0 && (
                   <button
                     onClick={async () => {
                       setAddingBatch(true)
                       await onAddBatch(
-                        filteredDevices.filter(d => selectedIps.has(d.ip)),
+                        filteredDevices.filter(d => selectedDeviceKeys.has(d._device_key)),
                         { username: sharedUsername, password: sharedPassword, rtspForDevice: buildRtspWithCreds }
                       )
                       setAddingBatch(false)
-                      setSelectedIps(new Set())
+                      setSelectedDeviceKeys(new Set())
                     }}
                     disabled={addingBatch}
                     className="btn-primary text-xs py-1 px-3"
@@ -448,7 +610,7 @@ function DiscoverModal({ onAdd, onAddBatch, onClose }) {
                     {addingBatch
                       ? <Loader2 size={12} className="inline mr-1 animate-spin" />
                       : <Plus size={12} className="inline mr-1" />}
-                    Add Selected ({selectedIps.size})
+                    Add Selected ({selectedDeviceKeys.size})
                   </button>
                 )}
               </div>
@@ -478,25 +640,26 @@ function DiscoverModal({ onAdd, onAddBatch, onClose }) {
           ) : (
             <div className="space-y-2 max-h-72 overflow-y-auto">
               {filteredDevices.map((d, i) => (
-                <div key={`${d.ip}-${i}`} className="flex items-center justify-between p-3 bg-surface-800 rounded-lg border border-surface-600">
+                <div key={d._device_key || `${d.ip}-${i}`} className="flex items-center justify-between p-3 bg-surface-800 rounded-lg border border-surface-600">
                   <div className="flex items-center gap-3">
                     <input
                       type="checkbox"
                       className="w-4 h-4 rounded accent-blue-500 flex-shrink-0"
-                      checked={selectedIps.has(d.ip)}
+                      checked={selectedDeviceKeys.has(d._device_key)}
                       onChange={e => {
-                        setSelectedIps(prev => {
+                        setSelectedDeviceKeys(prev => {
                           const next = new Set(prev)
-                          if (e.target.checked) next.add(d.ip)
-                          else next.delete(d.ip)
+                          if (e.target.checked) next.add(d._device_key)
+                          else next.delete(d._device_key)
                           return next
                         })
                       }}
                     />
                     <div>
-                      <div className="text-sm font-medium text-slate-200">{d.manufacturer} {d.model}</div>
+                      <div className="text-sm font-medium text-slate-200">{d.display_name || `${d.manufacturer} ${d.model}`}</div>
                       <div className="flex flex-wrap items-center gap-1.5 mt-1">
                         <span className="text-xs text-slate-500 font-mono">{d.ip} | {d.protocol}</span>
+                        {d.channel_label ? <span className="badge-info">{d.channel_label}</span> : null}
                         <span className="badge-info">{d.camera_style || 'Standard IP'}</span>
                         <span className="badge bg-surface-500 text-slate-300">{d.device_type || 'IP Camera'}</span>
                         <span className={d.is_avigilon_like ? 'badge-online' : 'badge bg-surface-500 text-slate-400'}>
@@ -730,7 +893,7 @@ export default function CameraManagement() {
     for (const device of devices) {
       try {
         await cameraApi.create({
-          name: `${device.manufacturer} ${device.model}`,
+          name: device.display_name || `${device.manufacturer} ${device.model}`,
           ip_address: device.ip,
           rtsp_url: typeof rtspForDevice === 'function'
             ? rtspForDevice(device)
@@ -973,7 +1136,7 @@ export default function CameraManagement() {
         <DiscoverModal
           onAdd={(device, creds = {}) => {
             setEditCamera({
-              name: `${device.manufacturer} ${device.model}`,
+              name: device.display_name || `${device.manufacturer} ${device.model}`,
               ip_address: device.ip,
               rtsp_url: creds.rtsp_url || device.suggested_rtsp || buildDefaultRtspUrl({
                 ip_address: device.ip,
