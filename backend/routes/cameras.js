@@ -77,6 +77,11 @@ router.get('/:id', authenticate, (req, res) => {
   }
 });
 
+function normalizePanoramicView(value) {
+  const view = Number(value);
+  return [1, 2, 3, 4].includes(view) ? view : 0;
+}
+
 // POST /api/cameras  (admin/operator)
 router.post(
   '/',
@@ -98,21 +103,23 @@ router.post(
       name, ip_address, port = 554, rtsp_url, username, password,
       protocol = 'RTSP', manufacturer, model, location, recording_enabled = 1,
       onvif_port = 80, resolution = '1920x1080', fps = 15, rotation = 0,
+      panoramic_view = 0,
     } = req.body;
 
     const normalizedRotation = [0, 90, 180, 270].includes(Number(rotation))
       ? Number(rotation)
       : 0;
+    const normalizedPanoramicView = normalizePanoramicView(panoramic_view);
 
     try {
       const result = db.prepare(`
         INSERT INTO cameras
           (name, ip_address, port, rtsp_url, username, password, protocol,
-           manufacturer, model, location, recording_enabled, onvif_port, resolution, fps, rotation)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           manufacturer, model, location, recording_enabled, onvif_port, resolution, fps, rotation, panoramic_view)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(name, ip_address, port, rtsp_url, username || null, password || null,
              protocol, manufacturer || null, model || null, location || null,
-             recording_enabled ? 1 : 0, onvif_port, resolution, fps, normalizedRotation);
+             recording_enabled ? 1 : 0, onvif_port, resolution, fps, normalizedRotation, normalizedPanoramicView);
 
       const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(result.lastInsertRowid);
 
@@ -147,7 +154,7 @@ router.put(
       const allowedFields = [
         'name', 'ip_address', 'port', 'rtsp_url', 'username', 'password',
         'protocol', 'manufacturer', 'model', 'location', 'recording_enabled',
-        'snapshot_url', 'onvif_port', 'resolution', 'fps', 'rotation',
+        'snapshot_url', 'onvif_port', 'resolution', 'fps', 'rotation', 'panoramic_view',
       ];
 
       const updates = {};
@@ -165,6 +172,10 @@ router.put(
           updates.rotation = [0, 90, 180, 270].includes(normalizedRotation) ? normalizedRotation : 0;
         }
 
+        if (updates.panoramic_view !== undefined) {
+          updates.panoramic_view = normalizePanoramicView(updates.panoramic_view);
+        }
+
         const sets = Object.keys(updates).map(k => `${k} = ?`).join(', ');
         db.prepare(`UPDATE cameras SET ${sets} WHERE id = ?`).run(...Object.values(updates), camera.id);
       }
@@ -174,7 +185,8 @@ router.put(
         updates.rtsp_url !== undefined ||
         updates.username !== undefined ||
         updates.password !== undefined ||
-        updates.port !== undefined;
+        updates.port !== undefined ||
+        updates.panoramic_view !== undefined;
 
       const recordingRelevantChanged =
         streamRelevantChanged || updates.recording_enabled !== undefined;

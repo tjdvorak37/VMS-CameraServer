@@ -54,6 +54,7 @@ function runMigrations(db) {
     ['last_seen', 'DATETIME'],
     ['thumbnail_path', 'TEXT'],
     ['rotation', 'INTEGER DEFAULT 0'],
+    ['panoramic_view', 'INTEGER DEFAULT 0'],
   ]);
 }
 
@@ -110,6 +111,7 @@ function initializeSchema(db) {
       resolution       TEXT DEFAULT '1920x1080',
       fps              INTEGER DEFAULT 15,
       rotation         INTEGER DEFAULT 0,
+      panoramic_view   INTEGER DEFAULT 0,
       stream_pid       INTEGER,
       record_pid       INTEGER,
       created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,

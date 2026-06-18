@@ -145,6 +145,25 @@ function buildRtspUrl(camera, sourceUrl = null) {
   }
 }
 
+function normalizePanoramicView(value) {
+  const view = Number(value);
+  return [1, 2, 3, 4].includes(view) ? view : 0;
+}
+
+function buildVideoFilter(camera) {
+  const panoramicView = normalizePanoramicView(camera.panoramic_view);
+  if (!panoramicView) return '';
+
+  const xOffsets = {
+    1: '0',
+    2: 'iw/4',
+    3: 'iw/2',
+    4: 'iw*3/4',
+  };
+
+  return `crop=iw/4:ih:${xOffsets[panoramicView]}:0`;
+}
+
 function buildRtspCandidates(camera) {
   const ip = String(camera.ip_address || '').trim();
   const port = Number(camera.port) > 0 ? Number(camera.port) : 554;
@@ -256,6 +275,11 @@ function startStream(camera) {
     '-rtsp_transport', transport,
     '-i', buildRtspUrl(camera),
   ];
+
+  const videoFilter = buildVideoFilter(camera);
+  if (videoFilter) {
+    args.push('-vf', videoFilter);
+  }
 
   args.push(
     '-c:v', 'libx264',
@@ -472,6 +496,11 @@ function captureSnapshot(camera) {
       '-y',
       snapshotFile,
     ];
+
+    const videoFilter = buildVideoFilter(camera);
+    if (videoFilter) {
+      args.splice(4, 0, '-vf', videoFilter);
+    }
 
     const proc = spawn('ffmpeg', args, { stdio: 'ignore' });
     proc.on('exit', (code) => {

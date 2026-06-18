@@ -122,6 +122,18 @@ function expandDiscoveredDevices(rawDevices = []) {
   return expanded
 }
 
+const PANORAMIC_VIEW_LABELS = {
+  1: 'Left',
+  2: 'Center Left',
+  3: 'Center Right',
+  4: 'Right',
+}
+
+function normalizePanoramicView(value) {
+  const view = Number(value)
+  return [1, 2, 3, 4].includes(view) ? view : 0
+}
+
 function AddEditModal({ camera, onClose, onSave }) {
   const [form, setForm] = useState({
     name: camera?.name || '',
@@ -144,6 +156,7 @@ function AddEditModal({ camera, onClose, onSave }) {
     resolution: camera?.resolution || '1920x1080',
     fps: camera?.fps || 15,
     rotation: Number(camera?.rotation) || 0,
+    panoramic_view: normalizePanoramicView(camera?.panoramic_view),
     recording_enabled: camera?.recording_enabled !== 0,
   })
   const [saving, setSaving] = useState(false)
@@ -226,6 +239,52 @@ function AddEditModal({ camera, onClose, onSave }) {
     }
   }
 
+  const handleAddPanoramaViews = async () => {
+    if (camera?.id) return
+
+    const ip = String(form.ip_address || '').trim()
+    const baseRtsp = String(form.rtsp_url || '').trim()
+
+    if (!ip || !baseRtsp) {
+      toast.error('IP address and RTSP URL are required')
+      return
+    }
+
+    setAddingChannels(true)
+    let added = 0
+    let failed = 0
+
+    try {
+      const baseName = String(form.name || '').trim() || `${form.manufacturer || 'Camera'} ${form.model || ''}`.trim() || ip
+
+      for (let view = 1; view <= 4; view += 1) {
+        try {
+          await cameraApi.create({
+            ...form,
+            name: `${baseName} ${PANORAMIC_VIEW_LABELS[view] || `View ${view}`}`,
+            rtsp_url: baseRtsp,
+            panoramic_view: view,
+          })
+          added += 1
+        } catch (_) {
+          failed += 1
+        }
+      }
+
+      if (added > 0) {
+        toast.success(`Added ${added} panoramic view${added === 1 ? '' : 's'} from ${ip}`)
+        onSave()
+        onClose()
+      }
+
+      if (failed > 0) {
+        toast.error(`${failed} panoramic view${failed === 1 ? '' : 's'} failed to add`)
+      }
+    } finally {
+      setAddingChannels(false)
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 animate-fade-in">
       <div className="bg-surface-700 border border-surface-500 rounded-2xl w-full max-w-xl shadow-2xl overflow-y-auto max-h-[90vh]">
@@ -268,8 +327,18 @@ function AddEditModal({ camera, onClose, onSave }) {
                   {addingChannels ? <Loader2 size={16} className="animate-spin inline mr-2" /> : null}
                   Add Stream 1-{streamCount}
                 </button>
+                <button
+                  type="button"
+                  onClick={handleAddPanoramaViews}
+                  disabled={saving || addingChannels}
+                  className="btn-secondary"
+                  title="Create 4 cropped panorama views from one wide feed"
+                >
+                  {addingChannels ? <Loader2 size={16} className="animate-spin inline mr-2" /> : null}
+                  Add Panorama Views 1-4
+                </button>
               </div>
-              <p className="text-xs text-slate-300/90 mt-2">Use this when one recorder IP has multiple camera channels.</p>
+              <p className="text-xs text-slate-300/90 mt-2">Use this when one recorder IP has multiple camera channels or a single panoramic feed.</p>
             </div>
           )}
 
@@ -350,6 +419,16 @@ function AddEditModal({ camera, onClose, onSave }) {
                 <option value="90">90°</option>
                 <option value="180">180° (Upside down)</option>
                 <option value="270">270°</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Panoramic View</label>
+              <select className="input" value={form.panoramic_view} onChange={e => setForm(f => ({ ...f, panoramic_view: normalizePanoramicView(e.target.value) }))}>
+                <option value="0">Full frame</option>
+                <option value="1">1 - Left</option>
+                <option value="2">2 - Center Left</option>
+                <option value="3">3 - Center Right</option>
+                <option value="4">4 - Right</option>
               </select>
             </div>
             <div className="col-span-2">
@@ -593,7 +672,7 @@ function DiscoverModal({ onAdd, onAddBatch, onClose }) {
                   <input
                     type="checkbox"
                     className="w-3.5 h-3.5 rounded accent-blue-500"
-                    checked={filteredDevices.every(d => selectedIps.has(d.ip))}
+                    checked={filteredDevices.every(d => selectedDeviceKeys.has(d._device_key))}
                     onChange={e => {
                       if (e.target.checked) setSelectedDeviceKeys(new Set(filteredDevices.map(d => d._device_key)))
                       else setSelectedDeviceKeys(new Set())
@@ -668,6 +747,7 @@ function DiscoverModal({ onAdd, onAddBatch, onClose }) {
                       <div className="flex flex-wrap items-center gap-1.5 mt-1">
                         <span className="text-xs text-slate-500 font-mono">{d.ip} | {d.protocol}</span>
                         {d.channel_label ? <span className="badge-info">{d.channel_label}</span> : null}
+                        {d.panoramic_view ? <span className="badge-info">View {d.panoramic_view}</span> : null}
                         <span className="badge-info">{d.camera_style || 'Standard IP'}</span>
                         <span className="badge bg-surface-500 text-slate-300">{d.device_type || 'IP Camera'}</span>
                         <span className={d.is_avigilon_like ? 'badge-online' : 'badge bg-surface-500 text-slate-400'}>
@@ -1158,6 +1238,7 @@ export default function CameraManagement() {
               model: device.model,
               onvif_port: device.onvif_port,
               rotation: 0,
+              panoramic_view: device.panoramic_view || 0,
             })
             setModal('add')
           }}
