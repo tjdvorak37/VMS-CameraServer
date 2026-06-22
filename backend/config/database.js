@@ -55,6 +55,7 @@ function runMigrations(db) {
     ['thumbnail_path', 'TEXT'],
     ['rotation', 'INTEGER DEFAULT 0'],
     ['panoramic_view', 'INTEGER DEFAULT 0'],
+    ['use_rtsp_proxy', 'INTEGER DEFAULT 0'],
   ]);
 }
 
@@ -112,6 +113,7 @@ function initializeSchema(db) {
       fps              INTEGER DEFAULT 15,
       rotation         INTEGER DEFAULT 0,
       panoramic_view   INTEGER DEFAULT 0,
+      use_rtsp_proxy   INTEGER DEFAULT 0,
       stream_pid       INTEGER,
       record_pid       INTEGER,
       created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,

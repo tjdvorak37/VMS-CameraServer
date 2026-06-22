@@ -23,6 +23,11 @@ services:
       - THUMBNAILS_DIR=/app/data/thumbnails
       - RETENTION_DAYS=${RETENTION_DAYS:-30}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:8080}
+      - RTSP_PROXY_MODE=${RTSP_PROXY_MODE:-off}
+      - MEDIAMTX_RTSP_URL=${MEDIAMTX_RTSP_URL:-rtsp://mediamtx:8554}
+      - MEDIAMTX_API_URL=${MEDIAMTX_API_URL:-http://mediamtx:9997}
+      - MEDIAMTX_PATH_TEMPLATE=${MEDIAMTX_PATH_TEMPLATE:-camera-{id}}
+      - LEGACY_SDP_CAMERA_IDS=${LEGACY_SDP_CAMERA_IDS:-}
     networks:
       - vms-network
     healthcheck:
@@ -49,6 +54,23 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # Optional RTSP proxy sidecar for legacy cameras with broken SDP behavior.
+  # Enable with: docker compose --profile rtsp-proxy up -d
+  mediamtx:
+    image: bluenviron/mediamtx:1.11.3
+    container_name: vms-mediamtx
+    restart: unless-stopped
+    profiles:
+      - rtsp-proxy
+    expose:
+      - "8554"
+      - "9997"
+    environment:
+      - MTX_API=yes
+      - MTX_APIADDRESS=:9997
+    networks:
+      - vms-network
 
 volumes:
   vms-data:

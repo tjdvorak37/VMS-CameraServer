@@ -93,6 +93,12 @@ If `.env` already exists (for example from `setup.sh`), edit it in place instead
 docker compose up -d --build
 ```
 
+For legacy cameras that need the optional MediaMTX proxy sidecar, use:
+
+```bash
+docker compose --profile rtsp-proxy up -d --build
+```
+
 This builds the frontend into the nginx image, so port `8080` serves the new UI from nginx.
 
 The application will be available on port **8080** (configurable via `VMS_PORT` in `.env`).
@@ -183,6 +189,11 @@ Copy `.env.example` to `.env` and adjust as needed.
 | `NODE_ENV` | `production` | `development` or `production` |
 | `VMS_PORT` | `8080` | Public-facing nginx port (Docker only) |
 | `CORS_ORIGINS` | `http://localhost:5173,http://localhost:3001` | Comma-separated allowed origins |
+| `RTSP_PROXY_MODE` | `off` | `off` or `mediamtx`; enables proxy routing for legacy cameras |
+| `MEDIAMTX_RTSP_URL` | `rtsp://mediamtx:8554` | MediaMTX RTSP endpoint used by backend |
+| `MEDIAMTX_API_URL` | `http://mediamtx:9997` | MediaMTX API endpoint used for dynamic path registration |
+| `MEDIAMTX_PATH_TEMPLATE` | `camera-{id}` | Proxy stream path template (`{id}`, `{name}`, `{ip}`, `{hash}`) |
+| `LEGACY_SDP_CAMERA_IDS` | *(empty)* | Comma-separated camera IDs that should use proxy mode |
 | `DB_PATH` | `./data/vms.db` | Path to the SQLite database file |
 | `RECORDINGS_DIR` | `./data/recordings` | Directory for recorded video segments |
 | `STREAMS_DIR` | `./data/streams` | Directory for HLS live stream files |
@@ -236,6 +247,20 @@ Copy `.env.example` to `.env` and adjust as needed.
 ---
 
 ## Adding Cameras
+
+### Legacy camera SDP workaround
+
+If an older camera exposes SDP that FFmpeg cannot handle directly:
+
+1. Set `RTSP_PROXY_MODE=mediamtx` in `.env`
+2. In Camera Management, edit each affected camera and enable `Use RTSP proxy (MediaMTX) for this camera`
+3. Start Docker with `docker compose --profile rtsp-proxy up -d --build`
+
+The backend will route proxy-enabled cameras through MediaMTX for both live and recording ingest while keeping direct RTSP for other cameras.
+
+`LEGACY_SDP_CAMERA_IDS` still works as an environment-level fallback for bulk bootstrap scenarios.
+
+For cameras not pre-listed, live stream startup now auto-tries direct RTSP first, then proxy mode on startup failure, then one direct retry if proxy startup fails.
 
 ### Automatic discovery (ONVIF)
 1. Go to **Camera Management** → click **Discover Cameras**

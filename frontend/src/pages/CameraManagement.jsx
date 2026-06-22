@@ -158,6 +158,7 @@ function AddEditModal({ camera, onClose, onSave }) {
     rotation: Number(camera?.rotation) || 0,
     panoramic_view: normalizePanoramicView(camera?.panoramic_view),
     recording_enabled: camera?.recording_enabled !== 0,
+    use_rtsp_proxy: camera?.use_rtsp_proxy === 1,
   })
   const [saving, setSaving] = useState(false)
   const [addingChannels, setAddingChannels] = useState(false)
@@ -430,6 +431,20 @@ function AddEditModal({ camera, onClose, onSave }) {
                 <option value="3">3 - Center Right</option>
                 <option value="4">4 - Right</option>
               </select>
+            </div>
+            <div className="col-span-2">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 rounded accent-blue-500"
+                  checked={form.use_rtsp_proxy}
+                  onChange={e => setForm(f => ({ ...f, use_rtsp_proxy: e.target.checked }))}
+                />
+                <span className="text-sm text-slate-300">Use RTSP proxy (MediaMTX) for this camera</span>
+              </label>
+              <p className="text-xs text-slate-500 mt-1">
+                Useful for older firmware with broken SDP. Requires RTSP_PROXY_MODE=mediamtx and the rtsp-proxy profile.
+              </p>
             </div>
             <div className="col-span-2">
               <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -782,6 +797,7 @@ export default function CameraManagement() {
   const [loading, setLoading] = useState(true)
   const [cameraLoadError, setCameraLoadError] = useState('')
   const [search, setSearch] = useState('')
+  const [showProxyOnly, setShowProxyOnly] = useState(false)
   const [modal, setModal] = useState(null) // null | 'add' | 'edit' | 'discover'
   const [editCamera, setEditCamera] = useState(null)
   const [processing, setProcessing] = useState({})
@@ -1008,11 +1024,13 @@ export default function CameraManagement() {
     setModal(null)
   }
 
-  const filtered = cameras.filter(c =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.ip_address.includes(search) ||
-    (c.location || '').toLowerCase().includes(search.toLowerCase())
-  )
+  const filtered = cameras.filter(c => {
+    if (showProxyOnly && c.use_rtsp_proxy !== 1) return false
+
+    return c.name.toLowerCase().includes(search.toLowerCase()) ||
+      c.ip_address.includes(search) ||
+      (c.location || '').toLowerCase().includes(search.toLowerCase())
+  })
 
   if (authLoading) {
     return (
@@ -1052,6 +1070,13 @@ export default function CameraManagement() {
         </div>
         <button onClick={fetchCameras} className="btn-secondary">
           <RefreshCw size={14} className="mr-1.5" />Refresh
+        </button>
+        <button
+          onClick={() => setShowProxyOnly(v => !v)}
+          className={showProxyOnly ? 'btn-primary' : 'btn-secondary'}
+          title="Filter list to cameras using RTSP proxy"
+        >
+          {showProxyOnly ? 'Proxy Only: On' : 'Proxy Only: Off'}
         </button>
         {isOperator && (
           <button onClick={diagnoseOfflineCameras} className="btn-secondary" disabled={diagnosingOffline}>
@@ -1121,6 +1146,11 @@ export default function CameraManagement() {
                       <div>
                         <div className="font-medium text-slate-200">{cam.name}</div>
                         <div className="text-xs text-slate-500">{cam.manufacturer} {cam.model}</div>
+                        {cam.use_rtsp_proxy === 1 && (
+                          <div className="mt-1">
+                            <span className="badge bg-info/20 text-info">RTSP Proxy</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </td>

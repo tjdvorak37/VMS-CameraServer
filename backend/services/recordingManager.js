@@ -8,6 +8,13 @@ const path = require('path');
 const fs = require('fs');
 const config = require('../config/config');
 const { getDb } = require('../config/database');
+const {
+  buildDirectRtspUrl,
+  buildProxyRtspUrl,
+  ensureMediaMtxPath,
+  isRtspProxyEnabled,
+  isCameraProxyPreferred,
+} = require('../utils/rtspSource');
 
 // Map of cameraId -> { process, currentFile, startedAt }
 const activeRecordings = new Map();
@@ -41,16 +48,11 @@ function resolveFfmpegBin() {
  * Build an effective RTSP URL, embedding stored credentials if not already in the URL.
  */
 function buildRtspUrl(camera) {
-  if (!camera.username && !camera.password) return camera.rtsp_url;
-  try {
-    const url = new URL(camera.rtsp_url);
-    // Always prefer stored camera credentials over any stale credentials in rtsp_url.
-    if (camera.username) url.username = camera.username;
-    if (camera.password) url.password = camera.password;
-    return url.toString();
-  } catch (_) {
-    return camera.rtsp_url;
+  if (isRtspProxyEnabled() && isCameraProxyPreferred(camera)) {
+    return buildProxyRtspUrl(camera);
   }
+
+  return buildDirectRtspUrl(camera);
 }
 
 /**
@@ -63,17 +65,10 @@ function ensureRecordingDir(cameraId) {
 }
 
 /**
- * Format a date as YYYYMMDD_HHmmss for filenames.
- */
-function formatTimestamp(date = new Date()) {
-  return date.toISOString().replace(/[-:]/g, '').replace('T', '_').substring(0, 15);
-}
-
-/**
  * Start continuous recording for a camera.
  * Records to segmented MP4 files; registers each segment in the DB.
  */
-function startRecording(camera) {
+async function startRecording(camera) {
   const id = camera.id;
   intentionallyStopped.delete(id);
 
@@ -82,14 +77,28 @@ function startRecording(camera) {
   }
 
   const recDir = ensureRecordingDir(id);
-  const ts = formatTimestamp();
 
   // Use segment muxer: creates files like recDir/20260317_120000.mp4
   const outputPattern = path.join(recDir, '%Y%m%d_%H%M%S.mp4');
 
+  const ffmpegBin = resolveFfmpegBin();
+
+  const recordingInputUrl = buildRtspUrl(camera);
+  const sourceMode = (isRtspProxyEnabled() && isCameraProxyPreferred(camera)) ? 'proxy' : 'direct';
+
+  if (sourceMode === 'proxy') {
+    const directRtspUrl = buildDirectRtspUrl(camera);
+    const registration = await ensureMediaMtxPath(camera, directRtspUrl);
+    if (!registration.ok) {
+      console.warn(
+        `[RecordingManager] MediaMTX path registration failed for camera ${id}: ${registration.detail || registration.reason}`
+      );
+    }
+  }
+
   const args = [
     '-rtsp_transport', 'tcp',
-    '-i', buildRtspUrl(camera),
+    '-i', recordingInputUrl,
     '-c:v', 'copy',
     '-c:a', 'aac',
     '-b:a', '96k',
@@ -103,9 +112,10 @@ function startRecording(camera) {
     outputPattern,
   ];
 
-  const ffmpegBin = resolveFfmpegBin();
-
-  console.log(`[RecordingManager] Starting recording for camera ${id} (${camera.name}) using ${ffmpegBin}`);
+  console.log(
+    `[RecordingManager] Starting recording for camera ${id} (${camera.name}) using ${ffmpegBin} ` +
+    `(source=${sourceMode})`
+  );
 
   const proc = spawn(ffmpegBin, args, {
     detached: false,

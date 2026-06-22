@@ -8,6 +8,14 @@ const path = require('path');
 const fs = require('fs');
 const config = require('../config/config');
 const { getDb } = require('../config/database');
+const {
+  buildDirectRtspUrl,
+  buildProxyRtspUrl,
+  ensureMediaMtxPath,
+  isRtspProxyEnabled,
+  isCameraMarkedLegacySdp,
+  isCameraProxyPreferred,
+} = require('../utils/rtspSource');
 
 // Map of cameraId -> { process, status, startedAt }
 const activeStreams = new Map();
@@ -16,6 +24,8 @@ const pendingRestartTimers = new Map();
 const restartBackoffMs = new Map();
 const cameraRtspTransportOverride = new Map();
 const cameraRtspUrlOverride = new Map();
+const cameraSourceModeOverride = new Map();
+const cameraProxyFallbackBlocked = new Set();
 const STREAM_MONITOR_INTERVAL_MS = 5000;
 const STREAM_STALE_AFTER_MS = Number(process.env.STREAM_STALE_AFTER_MS) > 0
   ? Number(process.env.STREAM_STALE_AFTER_MS)
@@ -42,6 +52,25 @@ function setCameraRtspTransport(cameraId, transport) {
   const normalized = String(transport || '').trim().toLowerCase();
   const safeTransport = normalized === 'udp' ? 'udp' : 'tcp';
   cameraRtspTransportOverride.set(Number(cameraId), safeTransport);
+}
+
+function getCameraSourceMode(cameraId, camera = null) {
+  const id = Number(cameraId);
+  if (cameraSourceModeOverride.has(id)) {
+    return cameraSourceModeOverride.get(id);
+  }
+
+  if (isRtspProxyEnabled() && (isCameraMarkedLegacySdp(id) || isCameraProxyPreferred(camera))) {
+    return 'proxy';
+  }
+
+  return 'direct';
+}
+
+function setCameraSourceMode(cameraId, mode) {
+  const id = Number(cameraId);
+  const safeMode = mode === 'proxy' ? 'proxy' : 'direct';
+  cameraSourceModeOverride.set(id, safeMode);
 }
 
 function resolveFfmpegBin() {
@@ -133,16 +162,7 @@ function isStreamHealthy(cameraId) {
  */
 function buildRtspUrl(camera, sourceUrl = null) {
   const effectiveUrl = sourceUrl || cameraRtspUrlOverride.get(Number(camera.id)) || camera.rtsp_url;
-  if (!camera.username && !camera.password) return effectiveUrl;
-  try {
-    const url = new URL(effectiveUrl);
-    // Always prefer stored camera credentials over any stale credentials in rtsp_url.
-    if (camera.username) url.username = camera.username;
-    if (camera.password) url.password = camera.password;
-    return url.toString();
-  } catch (_) {
-    return effectiveUrl;
-  }
+  return buildDirectRtspUrl(camera, effectiveUrl);
 }
 
 function normalizePanoramicView(value) {
@@ -256,10 +276,12 @@ function ensureStreamDir(cameraId) {
 /**
  * Start an HLS stream for a camera.
  */
-function startStream(camera) {
+async function startStream(camera) {
   const id = camera.id;
   intentionallyStopped.delete(id);
   clearPendingRestart(id);
+  const forcedProxy = isRtspProxyEnabled() && isCameraProxyPreferred(camera);
+  const sourceMode = getCameraSourceMode(id, camera);
   const transport = getCameraRtspTransport(id);
 
   if (activeStreams.has(id)) {
@@ -270,10 +292,23 @@ function startStream(camera) {
   clearStreamArtifacts(streamDir);
   const m3u8Path = path.join(streamDir, 'live.m3u8');
   const segmentPath = path.join(streamDir, 'seg%d.ts');
+  const directRtspUrl = buildRtspUrl(camera);
+  const streamInputUrl = sourceMode === 'proxy'
+    ? buildProxyRtspUrl(camera)
+    : directRtspUrl;
+
+  if (sourceMode === 'proxy') {
+    const registration = await ensureMediaMtxPath(camera, directRtspUrl);
+    if (!registration.ok) {
+      console.warn(
+        `[StreamManager] MediaMTX path registration failed for camera ${id}: ${registration.detail || registration.reason}`
+      );
+    }
+  }
 
   const args = [
     '-rtsp_transport', transport,
-    '-i', buildRtspUrl(camera),
+    '-i', streamInputUrl,
   ];
 
   const videoFilter = buildVideoFilter(camera);
@@ -302,7 +337,10 @@ function startStream(camera) {
 
   const ffmpegBin = resolveFfmpegBin();
 
-  console.log(`[StreamManager] Starting stream for camera ${id} (${camera.name}) using ${ffmpegBin} (rtsp_transport=${transport})`);
+  console.log(
+    `[StreamManager] Starting stream for camera ${id} (${camera.name}) using ${ffmpegBin} ` +
+    `(rtsp_transport=${transport}, source=${sourceMode})`
+  );
 
   const proc = spawn(ffmpegBin, args, {
     detached: false,
@@ -343,9 +381,38 @@ function startStream(camera) {
     if (wasIntentional) return;
 
     // If startup fails before ever becoming healthy on TCP, retry with UDP.
-    if (existingEntry && !existingEntry.lastHealthyAt && transport === 'tcp') {
+    if (existingEntry && !existingEntry.lastHealthyAt && existingEntry.sourceMode === 'direct' && transport === 'tcp') {
       setCameraRtspTransport(id, 'udp');
       scheduleRestart(id, `ffmpeg_exit_${code}_fallback_udp`);
+      return;
+    }
+
+    // Some legacy cameras provide SDP that FFmpeg cannot consume reliably.
+    // If direct RTSP startup failed on both transports, route through proxy mode.
+    if (
+      existingEntry &&
+      !existingEntry.lastHealthyAt &&
+      existingEntry.sourceMode === 'direct' &&
+      isRtspProxyEnabled() &&
+      !cameraProxyFallbackBlocked.has(id)
+    ) {
+      setCameraSourceMode(id, 'proxy');
+      setCameraRtspTransport(id, 'tcp');
+      scheduleRestart(id, `ffmpeg_exit_${code}_fallback_proxy`);
+      return;
+    }
+
+    // If an automatic proxy fallback also fails, retry direct mode once and stop looping.
+    if (
+      existingEntry &&
+      !existingEntry.lastHealthyAt &&
+      existingEntry.sourceMode === 'proxy' &&
+      !existingEntry.forcedProxy
+    ) {
+      setCameraSourceMode(id, 'direct');
+      cameraProxyFallbackBlocked.add(id);
+      setCameraRtspTransport(id, 'tcp');
+      scheduleRestart(id, `ffmpeg_exit_${code}_proxy_failed_direct_retry`);
       return;
     }
 
@@ -373,6 +440,8 @@ function startStream(camera) {
     status: 'starting',
     startedAt: new Date().toISOString(),
     transport,
+    sourceMode,
+    forcedProxy,
     cameraId: id,
     healthCheckTimer: null,
     monitorTimer: null,
@@ -390,7 +459,10 @@ function startStream(camera) {
 
     if (isStreamHealthy(id)) {
       entry.status = 'streaming';
-      rememberWorkingRtsp(camera, buildRtspUrl(camera), transport);
+      if (entry.sourceMode === 'direct') {
+        rememberWorkingRtsp(camera, directRtspUrl, transport);
+      }
+      cameraProxyFallbackBlocked.delete(id);
       entry.lastHealthyAt = Date.now();
       restartBackoffMs.set(id, MIN_RESTART_DELAY_MS);
       clearInterval(healthCheckTimer);
@@ -652,6 +724,7 @@ function getAllStreamStatuses() {
       startedAt: entry.startedAt,
       pid: entry.process ? entry.process.pid : null,
       transport: entry.transport || getCameraRtspTransport(id),
+      sourceMode: entry.sourceMode || getCameraSourceMode(id),
     };
   });
   return result;

@@ -103,7 +103,7 @@ router.post(
       name, ip_address, port = 554, rtsp_url, username, password,
       protocol = 'RTSP', manufacturer, model, location, recording_enabled = 1,
       onvif_port = 80, resolution = '1920x1080', fps = 15, rotation = 0,
-      panoramic_view = 0,
+      panoramic_view = 0, use_rtsp_proxy = 0,
     } = req.body;
 
     const normalizedRotation = [0, 90, 180, 270].includes(Number(rotation))
@@ -115,11 +115,11 @@ router.post(
       const result = db.prepare(`
         INSERT INTO cameras
           (name, ip_address, port, rtsp_url, username, password, protocol,
-           manufacturer, model, location, recording_enabled, onvif_port, resolution, fps, rotation, panoramic_view)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           manufacturer, model, location, recording_enabled, onvif_port, resolution, fps, rotation, panoramic_view, use_rtsp_proxy)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(name, ip_address, port, rtsp_url, username || null, password || null,
              protocol, manufacturer || null, model || null, location || null,
-             recording_enabled ? 1 : 0, onvif_port, resolution, fps, normalizedRotation, normalizedPanoramicView);
+             recording_enabled ? 1 : 0, onvif_port, resolution, fps, normalizedRotation, normalizedPanoramicView, use_rtsp_proxy ? 1 : 0);
 
       const camera = db.prepare('SELECT * FROM cameras WHERE id = ?').get(result.lastInsertRowid);
 
@@ -155,6 +155,7 @@ router.put(
         'name', 'ip_address', 'port', 'rtsp_url', 'username', 'password',
         'protocol', 'manufacturer', 'model', 'location', 'recording_enabled',
         'snapshot_url', 'onvif_port', 'resolution', 'fps', 'rotation', 'panoramic_view',
+        'use_rtsp_proxy',
       ];
 
       const updates = {};
@@ -186,7 +187,8 @@ router.put(
         updates.username !== undefined ||
         updates.password !== undefined ||
         updates.port !== undefined ||
-        updates.panoramic_view !== undefined;
+        updates.panoramic_view !== undefined ||
+        updates.use_rtsp_proxy !== undefined;
 
       const recordingRelevantChanged =
         streamRelevantChanged || updates.recording_enabled !== undefined;
