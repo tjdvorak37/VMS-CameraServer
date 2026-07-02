@@ -12,6 +12,8 @@ export default function VideoPlayer({
   className = '',
   showControls = true,
   cameraRotation = 0,
+  cameraAspectRatio = null,
+  videoFit = 'cover',
   connectionLabel = 'Connecting...',
   unavailableLabel = 'Stream unavailable',
 }) {
@@ -118,13 +120,16 @@ export default function VideoPlayer({
   }
 
   return (
-    <div className={`camera-cell group ${className}`}>
+    <div
+      className={`camera-cell group ${className}`}
+      style={cameraAspectRatio ? { aspectRatio: String(cameraAspectRatio) } : undefined}
+    >
       <video
         ref={videoRef}
         muted={state.muted}
         playsInline
         autoPlay
-        className="w-full h-full object-cover"
+        className={`w-full h-full ${videoFit === 'contain' ? 'object-contain bg-black' : 'object-cover'}`}
         style={{ transform: `rotate(${Number(cameraRotation) || 0}deg)` }}
       />
 

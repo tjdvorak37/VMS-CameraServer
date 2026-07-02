@@ -56,12 +56,12 @@ function setCameraRtspTransport(cameraId, transport) {
 
 function getCameraSourceMode(cameraId, camera = null) {
   const id = Number(cameraId);
-  if (cameraSourceModeOverride.has(id)) {
-    return cameraSourceModeOverride.get(id);
-  }
-
   if (isRtspProxyEnabled() && (isCameraMarkedLegacySdp(id) || isCameraProxyPreferred(camera))) {
     return 'proxy';
+  }
+
+  if (cameraSourceModeOverride.has(id)) {
+    return cameraSourceModeOverride.get(id);
   }
 
   return 'direct';
@@ -165,14 +165,83 @@ function buildRtspUrl(camera, sourceUrl = null) {
   return buildDirectRtspUrl(camera, effectiveUrl);
 }
 
+function buildProbeInputUrl(camera, sourceUrl = null, embedCredentials = true) {
+  if (!sourceUrl && embedCredentials) {
+    return buildRtspUrl(camera);
+  }
+
+  if (!embedCredentials) {
+    return sourceUrl || camera.rtsp_url;
+  }
+
+  return buildRtspUrl(camera, sourceUrl);
+}
+
 function normalizePanoramicView(value) {
   const view = Number(value);
   return [1, 2, 3, 4].includes(view) ? view : 0;
 }
 
+function parseResolution(value) {
+  const text = String(value || '').trim();
+  const match = text.match(/(\d+)\s*[x×]\s*(\d+)/i);
+  if (!match) return null;
+
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+
+  return { width, height };
+}
+
+function shouldUseQuadPanoramicCrop(camera, parsedResolution) {
+  const modelText = String(camera?.model || '').toLowerCase();
+  const manufacturerText = String(camera?.manufacturer || '').toLowerCase();
+  const nameText = String(camera?.name || '').toLowerCase();
+  const combinedText = `${manufacturerText} ${modelText} ${nameText}`;
+
+  // Strong hints that the source is a 2x2 composite stream.
+  if (/\b(quad|2x2|mosaic)\b/.test(combinedText)) {
+    return true;
+  }
+
+  // Strong hints that the source is a wide panoramic strip.
+  if (/\b(panoramic|panorama|surround|180|360)\b/.test(combinedText)) {
+    return false;
+  }
+
+  if (!parsedResolution) {
+    return false;
+  }
+
+  const aspectRatio = parsedResolution.width / parsedResolution.height;
+
+  // Treat near-4:3 and square-ish outputs as likely 2x2 composites.
+  // 16:9 defaults (e.g. 1920x1080) should not force quad mode.
+  return aspectRatio <= 1.6;
+}
+
 function buildVideoFilter(camera) {
   const panoramicView = normalizePanoramicView(camera.panoramic_view);
   if (!panoramicView) return '';
+
+  const parsedResolution = parseResolution(camera.resolution);
+  const useQuadCrop = shouldUseQuadPanoramicCrop(camera, parsedResolution);
+
+  // Some panoramic cameras output one wide strip, while others output a 2x2 mosaic.
+  // Use a conservative detector so default 16:9 metadata does not cause over-zoomed crops.
+  if (useQuadCrop) {
+    const quadOffsets = {
+      1: ['0', '0'],
+      2: ['iw/2', '0'],
+      3: ['0', 'ih/2'],
+      4: ['iw/2', 'ih/2'],
+    };
+    const [x, y] = quadOffsets[panoramicView] || ['0', '0'];
+    return `crop=iw/2:ih/2:${x}:${y}`;
+  }
 
   const xOffsets = {
     1: '0',
@@ -216,12 +285,13 @@ function rememberWorkingRtsp(camera, rtspUrl, transport) {
   }
 }
 
-function runRtspProbe(camera, transport, timeoutMs) {
+function runRtspProbe(camera, transport, timeoutMs, options = {}) {
+  const { sourceUrl = null, embedCredentials = true } = options;
   const ffmpegBin = resolveFfmpegBin();
   const args = [
     '-rtsp_transport', transport,
     '-loglevel', 'error',
-    '-i', buildRtspUrl(camera),
+    '-i', buildProbeInputUrl(camera, sourceUrl, embedCredentials),
     '-t', '3',
     '-f', 'null',
     '-',
@@ -599,7 +669,47 @@ function testRtspConnection(camera, options = {}) {
   const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 12000;
 
   return new Promise(async (resolve) => {
+    const proxyPreferred = isRtspProxyEnabled() && isCameraProxyPreferred(camera);
     const primaryTransport = getCameraRtspTransport(camera.id);
+
+    if (proxyPreferred) {
+      const directRtspUrl = buildRtspUrl(camera);
+      const proxyRtspUrl = buildProxyRtspUrl(camera);
+      const registration = await ensureMediaMtxPath(camera, directRtspUrl);
+
+      if (registration.ok) {
+        const proxyPrimary = await runRtspProbe(camera, primaryTransport, timeoutMs, {
+          sourceUrl: proxyRtspUrl,
+          embedCredentials: false,
+        });
+
+        if (proxyPrimary.ok) {
+          setCameraRtspTransport(camera.id, primaryTransport);
+          return resolve({
+            ok: true,
+            reason: 'ok',
+            message: `RTSP proxy connection successful (${primaryTransport.toUpperCase()})`,
+          });
+        }
+
+        const alternateTransport = primaryTransport === 'tcp' ? 'udp' : 'tcp';
+        const proxyAlternate = await runRtspProbe(camera, alternateTransport, timeoutMs, {
+          sourceUrl: proxyRtspUrl,
+          embedCredentials: false,
+        });
+
+        if (proxyAlternate.ok) {
+          setCameraRtspTransport(camera.id, alternateTransport);
+          return resolve({
+            ok: true,
+            reason: 'ok',
+            message: `RTSP proxy connection successful (${alternateTransport.toUpperCase()})`,
+            detail: `Primary transport ${primaryTransport.toUpperCase()} failed and fallback to ${alternateTransport.toUpperCase()} succeeded.`,
+          });
+        }
+      }
+    }
+
     const primary = await runRtspProbe(camera, primaryTransport, timeoutMs);
 
     if (primary.ok) {

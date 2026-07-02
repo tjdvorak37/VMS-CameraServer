@@ -82,6 +82,12 @@ function normalizePanoramicView(value) {
   return [1, 2, 3, 4].includes(view) ? view : 0;
 }
 
+function sanitizeRtspUrl(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^rtsp\s+url\s*:\s*/i, '');
+}
+
 // POST /api/cameras  (admin/operator)
 router.post(
   '/',
@@ -110,6 +116,7 @@ router.post(
       ? Number(rotation)
       : 0;
     const normalizedPanoramicView = normalizePanoramicView(panoramic_view);
+    const normalizedRtspUrl = sanitizeRtspUrl(rtsp_url);
 
     try {
       const result = db.prepare(`
@@ -117,7 +124,7 @@ router.post(
           (name, ip_address, port, rtsp_url, username, password, protocol,
            manufacturer, model, location, recording_enabled, onvif_port, resolution, fps, rotation, panoramic_view, use_rtsp_proxy)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      `).run(name, ip_address, port, rtsp_url, username || null, password || null,
+      `).run(name, ip_address, port, normalizedRtspUrl, username || null, password || null,
              protocol, manufacturer || null, model || null, location || null,
              recording_enabled ? 1 : 0, onvif_port, resolution, fps, normalizedRotation, normalizedPanoramicView, use_rtsp_proxy ? 1 : 0);
 
@@ -166,6 +173,10 @@ router.put(
           updates[f] = typeof v === 'boolean' ? (v ? 1 : 0) : v;
         }
       });
+
+      if (updates.rtsp_url !== undefined) {
+        updates.rtsp_url = sanitizeRtspUrl(updates.rtsp_url);
+      }
 
       if (Object.keys(updates).length > 0) {
         if (updates.rotation !== undefined) {

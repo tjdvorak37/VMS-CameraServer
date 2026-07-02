@@ -6,14 +6,14 @@ import { useAuth } from '../contexts/AuthContext'
 import toast from 'react-hot-toast'
 
 const LAYOUTS = [
-  { id: 1,  label: '1×1',  cols: 1 },
-  { id: 4,  label: '2×2',  cols: 2 },
-  { id: 9,  label: '3×3',  cols: 3 },
-  { id: 16, label: '4×4',  cols: 4 },
+  { id: '2x2',  label: '2×2',  cols: 2 },
+  { id: '3x3',  label: '3×3',  cols: 3 },
+  { id: '5x6',  label: '5×6',  cols: 5 },
 ]
 
 function LayoutButton({ layout, active, onClick }) {
-  const dots = Array.from({ length: layout.id })
+  const dots = Array.from({ length: layout.cols * layout.cols }).slice(0, layout.cols <= 3 ? layout.cols * layout.cols : 9)
+  const previewCols = layout.cols <= 3 ? layout.cols : 3
   return (
     <button
       onClick={onClick}
@@ -26,7 +26,7 @@ function LayoutButton({ layout, active, onClick }) {
     >
       <div
         className="grid gap-0.5"
-        style={{ gridTemplateColumns: `repeat(${layout.cols}, 1fr)`, width: 18, height: 18 }}
+        style={{ gridTemplateColumns: `repeat(${previewCols}, 1fr)`, width: 18, height: 18 }}
       >
         {dots.map((_, i) => (
           <div key={i} className="bg-current rounded-sm" style={{ width: 4, height: 4 }} />
@@ -39,7 +39,8 @@ function LayoutButton({ layout, active, onClick }) {
 export default function LiveView() {
   const { isOperator } = useAuth()
   const [cameras, setCameras] = useState([])
-  const [layout, setLayout] = useState(4)
+  const [cameraOrder, setCameraOrder] = useState([]) // ordered list of camera ids
+  const [layout, setLayout] = useState('3x3')
   const [selected, setSelected] = useState(null)
   const [loading, setLoading] = useState(true)
   const [recovering, setRecovering] = useState(false)
@@ -49,6 +50,7 @@ export default function LiveView() {
   const [diagnosticsUpdatedAt, setDiagnosticsUpdatedAt] = useState(null)
   const [cameraLoadError, setCameraLoadError] = useState('')
   const lastGoodCamerasRef = useRef([])
+  const dragSrc = useRef(null)
 
   const fetchCameras = useCallback(() => {
     cameraApi.list()
@@ -59,6 +61,14 @@ export default function LiveView() {
           lastGoodCamerasRef.current = nextCameras
           setCameras(nextCameras)
           setCameraLoadError('')
+          // Preserve existing order; append any new camera ids at the end
+          setCameraOrder(prev => {
+            const existing = new Set(prev)
+            const incoming = nextCameras.map(c => c.id)
+            const merged = prev.filter(id => incoming.includes(id))
+            incoming.forEach(id => { if (!existing.has(id)) merged.push(id) })
+            return merged
+          })
           return
         }
 
@@ -68,6 +78,7 @@ export default function LiveView() {
         }
 
         setCameras([])
+        setCameraOrder([])
         setCameraLoadError('')
       })
       .catch(err => {
@@ -89,13 +100,45 @@ export default function LiveView() {
     return () => clearInterval(interval)
   }, [fetchCameras])
 
-  const layoutConfig = LAYOUTS.find(l => l.id === layout)
+  const layoutConfig = LAYOUTS.find(l => l.id === layout) || LAYOUTS[1]
+
+  // All cameras shown — order driven by cameraOrder (drag state)
+  const cameraMap = Object.fromEntries(cameras.map(c => [c.id, c]))
+  const orderedCameras = cameraOrder.map(id => cameraMap[id]).filter(Boolean)
   const visibleCameras = selected
-    ? [cameras.find(c => c.id === selected)].filter(Boolean)
-    : cameras.slice(0, layout)
+    ? [cameraMap[selected]].filter(Boolean)
+    : orderedCameras
 
   const streamUrl = (camera) =>
     `/api/streams/${camera.id}/live.m3u8`
+
+  // Drag-and-drop handlers
+  const handleDragStart = (e, cameraId) => {
+    dragSrc.current = cameraId
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const handleDragOver = (e) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+  }
+
+  const handleDrop = (e, targetId) => {
+    e.preventDefault()
+    if (dragSrc.current == null || dragSrc.current === targetId) return
+    setCameraOrder(prev => {
+      const next = [...prev]
+      const from = next.indexOf(dragSrc.current)
+      const to = next.indexOf(targetId)
+      if (from === -1 || to === -1) return prev
+      next.splice(from, 1)
+      next.splice(to, 0, dragSrc.current)
+      return next
+    })
+    dragSrc.current = null
+  }
+
+  const handleDragEnd = () => { dragSrc.current = null }
 
   const recoverLiveView = async () => {
     setRecovering(true)
@@ -280,7 +323,7 @@ export default function LiveView() {
         </div>
       )}
 
-      {/* Camera Grid */}
+      {/* Camera Grid — scrollable, shows all cameras */}
       {cameras.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center">
           <CameraIcon size={48} className="text-slate-600 mb-4" />
@@ -304,102 +347,87 @@ export default function LiveView() {
           )}
 
           <div
-            className={`flex-1 grid gap-2 content-start`}
-            style={{
-              gridTemplateColumns: selected ? '1fr' : `repeat(${layoutConfig?.cols || 2}, 1fr)`,
-            }}
+            className="overflow-y-auto"
+            style={{ flex: '1 1 0', minHeight: 0 }}
           >
-            {visibleCameras.map(camera => (
-              <div key={camera.id} className="flex flex-col gap-1" onDoubleClick={() => setSelected(camera.id)}>
-                <div className="relative group">
-                  <VideoPlayer
-                    src={streamUrl(camera)}
-                    cameraName={camera.name}
-                    cameraRotation={camera.rotation}
-                    connectionLabel={camera.status === 'offline' ? 'Camera offline' : 'Connecting to stream...'}
-                    unavailableLabel={camera.status === 'offline' ? 'Camera unreachable' : 'Stream warming up or unavailable'}
-                    showControls
-                  />
-                </div>
-                <div className="flex items-center justify-between gap-2 px-1 text-xs text-slate-400">
-                  <span className="truncate pr-2">{camera.location || 'No location'}</span>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <span>{String(camera.resolution || '').replace('×', 'x')}</span>
-                    {diagnostics[camera.id] && !diagnostics[camera.id].ok && (
-                      <span
-                        className={`rounded-md px-2 py-0.5 text-[11px] ${
-                          diagnostics[camera.id].reason === 'network_unreachable' || diagnostics[camera.id].reason === 'timeout'
-                            ? 'bg-warning/20 text-warning'
-                            : 'bg-danger/20 text-danger'
-                        }`}
-                        title={diagnostics[camera.id].message}
-                      >
-                        {diagnostics[camera.id].reason === 'network_unreachable' || diagnostics[camera.id].reason === 'timeout'
-                          ? 'Network'
-                          : 'RTSP Error'}
-                      </span>
-                    )}
-                    {isOperator && (
-                      <button
-                        type="button"
-                        onClick={() => rotateCamera(camera)}
-                        disabled={Boolean(rotating[camera.id])}
-                        className="inline-flex items-center gap-1 rounded-md border border-slate-600/80 bg-surface-800/80 px-2 py-0.5 text-[11px] text-slate-300 hover:border-accent hover:text-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Rotate camera"
-                        aria-label="Rotate camera"
-                      >
-                        <RotateCw size={12} />
-                        {rotating[camera.id] ? 'Rotating...' : 'Rotate'}
-                      </button>
-                    )}
+            <div
+              className="grid gap-2"
+              style={{
+                gridTemplateColumns: selected ? '1fr' : `repeat(${layoutConfig.cols}, 1fr)`,
+              }}
+            >
+              {visibleCameras.map(camera => (
+                <div
+                  key={camera.id}
+                  className="flex flex-col gap-1 cursor-grab active:cursor-grabbing"
+                  draggable={!selected}
+                  onDragStart={e => handleDragStart(e, camera.id)}
+                  onDragOver={handleDragOver}
+                  onDrop={e => handleDrop(e, camera.id)}
+                  onDragEnd={handleDragEnd}
+                  onDoubleClick={() => selected ? setSelected(null) : setSelected(camera.id)}
+                >
+                  <div className="relative group">
+                    <VideoPlayer
+                      src={streamUrl(camera)}
+                      cameraName={camera.name}
+                      cameraRotation={camera.rotation}
+                      videoFit="contain"
+                      connectionLabel={camera.status === 'offline' ? 'Camera offline' : 'Connecting to stream...'}
+                      unavailableLabel={camera.status === 'offline' ? 'Camera unreachable' : 'Stream warming up or unavailable'}
+                      showControls
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-2 px-1 text-xs text-slate-400">
+                    <span className="truncate pr-2">{camera.location || 'No location'}</span>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span>{String(camera.resolution || '').replace('×', 'x')}</span>
+                      {Number(camera.panoramic_view) > 0 && (
+                        <span
+                          className="rounded-md px-2 py-0.5 text-[11px] bg-info/20 text-info"
+                          title={`Panorama crop view ${camera.panoramic_view}`}
+                        >
+                          P{camera.panoramic_view}
+                        </span>
+                      )}
+                      {diagnostics[camera.id] && !diagnostics[camera.id].ok && (
+                        <span
+                          className={`rounded-md px-2 py-0.5 text-[11px] ${
+                            diagnostics[camera.id].reason === 'network_unreachable' || diagnostics[camera.id].reason === 'timeout'
+                              ? 'bg-warning/20 text-warning'
+                              : 'bg-danger/20 text-danger'
+                          }`}
+                          title={diagnostics[camera.id].message}
+                        >
+                          {diagnostics[camera.id].reason === 'network_unreachable' || diagnostics[camera.id].reason === 'timeout'
+                            ? 'Network'
+                            : 'RTSP Error'}
+                        </span>
+                      )}
+                      {isOperator && (
+                        <button
+                          type="button"
+                          onClick={() => rotateCamera(camera)}
+                          disabled={Boolean(rotating[camera.id])}
+                          className="inline-flex items-center gap-1 rounded-md border border-slate-600/80 bg-surface-800/80 px-2 py-0.5 text-[11px] text-slate-300 hover:border-accent hover:text-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Rotate camera"
+                          aria-label="Rotate camera"
+                        >
+                          <RotateCw size={12} />
+                          {rotating[camera.id] ? 'Rotating...' : 'Rotate'}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-
-            {/* Empty placeholder cells */}
-            {!selected && cameras.length < layout &&
-              Array.from({ length: layout - cameras.length }).map((_, i) => (
-                <div key={`empty-${i}`} className="camera-cell flex items-center justify-center">
-                  <div className="flex flex-col items-center gap-2 text-slate-700">
-                    <CameraIcon size={24} />
-                    <span className="text-xs">Empty</span>
-                  </div>
-                </div>
-              ))
-            }
+              ))}
+            </div>
           </div>
         </>
       )}
 
-      {/* Camera strip (thumbnail selector) */}
-      {cameras.length > layout && !selected && (
-        <div className="flex-shrink-0">
-          <div className="flex gap-2 overflow-x-auto pb-2">
-            {cameras.slice(layout).map(camera => (
-              <button
-                key={camera.id}
-                onClick={() => setSelected(camera.id)}
-                className="flex-shrink-0 w-28 h-16 relative rounded-lg overflow-hidden 
-                           border border-surface-500 hover:border-accent transition-colors"
-              >
-                <div className="w-full h-full bg-black flex items-center justify-center">
-                  <CameraIcon size={16} className="text-slate-600" />
-                </div>
-                <div className="absolute bottom-0 left-0 right-0 bg-black/70 px-1 py-0.5">
-                  <span className="text-xs text-slate-300 truncate block">{camera.name}</span>
-                </div>
-                <span className={`absolute top-1 right-1 status-dot ${
-                  camera.status === 'online' ? 'status-dot-online' : 'status-dot-offline'
-                }`} />
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <p className="text-xs text-slate-600 text-center">
-         Double-click a camera to expand it | {cameras.length} total cameras
+      <p className="flex-shrink-0 text-xs text-slate-600 text-center">
+        Double-click to focus a camera · Drag tiles to reorder · {cameras.length} total cameras
       </p>
     </div>
   )

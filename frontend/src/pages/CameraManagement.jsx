@@ -294,6 +294,9 @@ function AddEditModal({ camera, onClose, onSave }) {
             <h2 className="text-lg font-semibold text-slate-100">
               {camera ? `Edit: ${camera.name}` : 'Add Camera'}
             </h2>
+            {camera?.id && (
+              <p className="text-xs text-warning mt-1">Build marker: PROXY-TOGGLE-V3</p>
+            )}
             {!camera?.id && (
               <p className="text-xs text-accent mt-1">Multi-cam mode enabled (use Add Stream 1-N)</p>
             )}
@@ -374,6 +377,18 @@ function AddEditModal({ camera, onClose, onSave }) {
                 placeholder="http://camera-ip/cgi-bin/snapshot.jpg"
               />
             </div>
+            <div className="col-span-2 rounded-lg border border-info/40 bg-info/10 p-3">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 rounded accent-blue-500"
+                  checked={form.use_rtsp_proxy}
+                  onChange={e => setForm(f => ({ ...f, use_rtsp_proxy: e.target.checked }))}
+                />
+                <span className="text-sm text-slate-200">Use RTSP proxy (MediaMTX) for this camera</span>
+              </label>
+              <p className="text-xs text-slate-400 mt-1">Proxy toggle duplicate for visibility. Requires rtsp-proxy profile.</p>
+            </div>
             <div>
               <label className="label">Username</label>
               <input className="input" value={form.username} onChange={e => updateRtsp('username', e.target.value)} autoComplete="off" />
@@ -432,31 +447,30 @@ function AddEditModal({ camera, onClose, onSave }) {
                 <option value="4">4 - Right</option>
               </select>
             </div>
-            <div className="col-span-2">
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  className="w-4 h-4 rounded accent-blue-500"
-                  checked={form.use_rtsp_proxy}
-                  onChange={e => setForm(f => ({ ...f, use_rtsp_proxy: e.target.checked }))}
-                />
-                <span className="text-sm text-slate-300">Use RTSP proxy (MediaMTX) for this camera</span>
-              </label>
-              <p className="text-xs text-slate-500 mt-1">
-                Useful for older firmware with broken SDP. Requires RTSP_PROXY_MODE=mediamtx and the rtsp-proxy profile.
-              </p>
-            </div>
-            <div className="col-span-2">
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  className="w-4 h-4 rounded accent-blue-500"
-                  checked={form.recording_enabled}
-                  onChange={e => setForm(f => ({ ...f, recording_enabled: e.target.checked }))}
-                />
-                <span className="text-sm text-slate-300">Enable continuous recording</span>
-              </label>
-            </div>
+          </div>
+
+          <div className="space-y-3 rounded-lg border border-surface-500 bg-surface-800/40 p-3">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                className="w-4 h-4 rounded accent-blue-500"
+                checked={form.use_rtsp_proxy}
+                onChange={e => setForm(f => ({ ...f, use_rtsp_proxy: e.target.checked }))}
+              />
+              <span className="text-sm text-slate-200">Use RTSP proxy (MediaMTX) for this camera</span>
+            </label>
+            <p className="text-xs text-slate-400">
+              Useful for older firmware with broken SDP. Requires RTSP_PROXY_MODE=mediamtx and the rtsp-proxy profile.
+            </p>
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                className="w-4 h-4 rounded accent-blue-500"
+                checked={form.recording_enabled}
+                onChange={e => setForm(f => ({ ...f, recording_enabled: e.target.checked }))}
+              />
+              <span className="text-sm text-slate-300">Enable continuous recording</span>
+            </label>
           </div>
 
           <div className="flex gap-3 pt-2 border-t border-surface-500">
@@ -936,13 +950,16 @@ export default function CameraManagement() {
       if (result.ok) {
         toast.success(`RTSP OK: ${cam.name}`)
       } else {
+        const detail = result.detail ? ` Detail: ${String(result.detail).slice(0, 220)}` : ''
         const reason = result.reason === 'network_unreachable' || result.reason === 'timeout'
           ? `Server cannot reach ${endpoint}. Check route/firewall between server and camera LAN.`
           : (result.message || 'RTSP test failed')
-        toast.error(`${cam.name}: ${reason}`)
+        toast.error(`${cam.name}: ${reason}${detail}`)
       }
     } catch (err) {
-      toast.error(err.response?.data?.error || 'RTSP test failed')
+      const baseError = err.response?.data?.error || 'RTSP test failed'
+      const details = err.response?.data?.details
+      toast.error(details ? `${baseError}: ${details}` : baseError)
     } finally {
       setProcessing(p => ({ ...p, [key]: false }))
     }
