@@ -30,7 +30,7 @@ if (-not (Test-Path $dockerDesktop)) {
 $taskName = "VMS-CameraServer-Autostart"
 $composeCommand = "docker compose up -d"
 
-$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -Command \"Set-Location '$ProjectPath'; $composeCommand\""
+$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -Command `"Set-Location '$ProjectPath'; $composeCommand`""
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -StartWhenAvailable
 
